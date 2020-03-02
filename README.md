@@ -11,7 +11,10 @@
 5. [2020 CS224N convnet notes](http://web.stanford.edu/class/cs224n/readings/cs224n-2019-notes08-CNN.pdf)
 
 ### Resolution
-1. [文本挖掘和预处理工具](https://github.com/blmoistawinde/HarvestText)
-2. [CCF BDCI 2019 互联网新闻情感分析 复赛top1解决方案 ](https://github.com/cxy229/BDCI2019-SENTIMENT-CLASSIFICATION)
-3. [Using Convolutional Neural Net for Sentiment Analysis ](https://github.com/Theo-/sentiment-analysis-keras-conv)
-4. [“互联网新闻情感分析”赛题](https://github.com/DefuLi/Emotional-Analysis-of-Internet-News)
+1. [HanLp](https://github.com/hankcs/HanLP)
+2. [Snownlp](https://github.com/isnowfy/snownlp)
+3. [BaiduSenta](https://github.com/baidu/Senta)
+4. [文本挖掘和预处理工具](https://github.com/blmoistawinde/HarvestText)
+5. [CCF BDCI 2019 互联网新闻情感分析 复赛top1解决方案 ](https://github.com/cxy229/BDCI2019-SENTIMENT-CLASSIFICATION)
+6. [Using Convolutional Neural Net for Sentiment Analysis ](https://github.com/Theo-/sentiment-analysis-keras-conv)
+7. [“互联网新闻情感分析”赛题](https://github.com/DefuLi/Emotional-Analysis-of-Internet-News)
