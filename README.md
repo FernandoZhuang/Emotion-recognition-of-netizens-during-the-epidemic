@@ -1,5 +1,9 @@
 # Emotion-recognition-of-netizens-during-the-epidemic
 
+## Mindmap
+
+![Mindmap](Docs/MindmapV0.0.0.png)
+
 ## Material
 
 ### Paper & Tutorial
