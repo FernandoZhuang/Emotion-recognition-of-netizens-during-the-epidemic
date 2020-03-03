@@ -2,7 +2,7 @@
 
 ## Mindmap
 
-![Mindmap](Docs/MindmapV0.0.0.png)
+![Mindmap](Docs/MindmapV0.0.1.png)
 
 ## Material
 
