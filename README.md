@@ -2,7 +2,7 @@
 
 ## Mindmap
 
-![Mindmap](Docs/MIndmapV0.0.1.png)
+![Mindmap](Docs/工作安排.png)
 
 ## Material
 
@@ -16,14 +16,30 @@
 6. [NLP Progress Sentiment Analysis](https://github.com/sebastianruder/NLP-progress/blob/master/english/sentiment_analysis.md)
 
 ### Resolution
+
+1. [CCF BDCI 2019 互联网新闻情感分析 复赛top1解决方案 ](https://github.com/cxy229/BDCI2019-SENTIMENT-CLASSIFICATION)
+2. [AI Challenger 2018：细粒度用户评论情感分类冠军思路总结 ](https://mp.weixin.qq.com/s/FJtMDoNksSZLYdoEzixJTQ)
+3. [“互联网新闻情感分析”赛题](https://github.com/DefuLi/Emotional-Analysis-of-Internet-News)
+
+### Lexical analysis
+
 1. [HanLp](https://github.com/hankcs/HanLP)
 2. [Snownlp](https://github.com/isnowfy/snownlp)
 3. [BaiduSenta](https://github.com/baidu/Senta)
 4. [文本挖掘和预处理工具](https://github.com/blmoistawinde/HarvestText)
-5. [CCF BDCI 2019 互联网新闻情感分析 复赛top1解决方案 ](https://github.com/cxy229/BDCI2019-SENTIMENT-CLASSIFICATION)
-6. [Using Convolutional Neural Net for Sentiment Analysis ](https://github.com/Theo-/sentiment-analysis-keras-conv)
-7. [“互联网新闻情感分析”赛题](https://github.com/DefuLi/Emotional-Analysis-of-Internet-News)
-8. [腾讯云词法分析](https://cloud.tencent.com/document/product/271/35494)
-9. [科大讯飞词法分析](https://www.xfyun.cn/doc/nlp/emotion-analysis/API.html)
-10. [情感分析资源大全](https://blog.csdn.net/qq280929090/article/details/70838025)
-11. [AI Challenger 2018：细粒度用户评论情感分类冠军思路总结 ](https://mp.weixin.qq.com/s/FJtMDoNksSZLYdoEzixJTQ)
+5. [腾讯云词法分析](https://cloud.tencent.com/document/product/271/35494)
+6. [科大讯飞词法分析](https://www.xfyun.cn/doc/nlp/emotion-analysis/API.html)
+
+### Pretraining
+
+1. [中文预训练BERT-wwm](https://github.com/ymcui/Chinese-BERT-wwm)
+2. [中文预训练RoBERTa模型](https://github.com/brightmart/roberta_zh)
+3. [CCF-BDCI-Sentiment-Analysis-Baseline](https://github.com/guoday/CCF-BDCI-Sentiment-Analysis-Baseline)
+4. [Bert base Chinese](https://github.com/google-research/bert)
+
+### Misc
+
+1. [Using Convolutional Neural Net for Sentiment Analysis ](https://github.com/Theo-/sentiment-analysis-keras-conv)
+2. [情感分析资源大全](https://blog.csdn.net/qq280929090/article/details/70838025)
+
+
