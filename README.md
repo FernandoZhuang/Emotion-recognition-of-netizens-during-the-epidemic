@@ -21,6 +21,13 @@
 2. [AI Challenger 2018：细粒度用户评论情感分类冠军思路总结 ](https://mp.weixin.qq.com/s/FJtMDoNksSZLYdoEzixJTQ)
 3. [“互联网新闻情感分析”赛题](https://github.com/DefuLi/Emotional-Analysis-of-Internet-News)
 
+### Data Augmentation
+
+1. [EDA 论文阅读](https://www.ctolib.com/zhanlaoban-eda_nlp_for_Chinese.html)
+2. [Unsupervised Data Augmentation ](https://github.com/google-research/uda)
+3. [Data augmentation for NLP](https://github.com/makcedward/nlpaug)
+4. [Easy Data Augmentation for NLP on Chinese ](https://github.com/gmftbyGMFTBY/EDA-NLP-Chinese)
+
 ### Lexical analysis
 
 1. [HanLp](https://github.com/hankcs/HanLP)
@@ -32,10 +39,11 @@
 
 ### Pretraining
 
-1. [中文预训练BERT-wwm](https://github.com/ymcui/Chinese-BERT-wwm)
-2. [中文预训练RoBERTa模型](https://github.com/brightmart/roberta_zh)
-3. [CCF-BDCI-Sentiment-Analysis-Baseline](https://github.com/guoday/CCF-BDCI-Sentiment-Analysis-Baseline)
-4. [Bert base Chinese](https://github.com/google-research/bert)
+1. [Mapping a variable-length sentence to a fixed-length vector using BERT model ](https://github.com/hanxiao/bert-as-service)
+2. [中文预训练BERT-wwm](https://github.com/ymcui/Chinese-BERT-wwm)
+3. [中文预训练RoBERTa模型](https://github.com/brightmart/roberta_zh)
+4. [CCF-BDCI-Sentiment-Analysis-Baseline](https://github.com/guoday/CCF-BDCI-Sentiment-Analysis-Baseline)
+5. [Bert base Chinese](https://github.com/google-research/bert)
 
 ### Misc
 
