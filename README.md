@@ -44,6 +44,7 @@
 3. [中文预训练RoBERTa模型](https://github.com/brightmart/roberta_zh)
 4. [CCF-BDCI-Sentiment-Analysis-Baseline](https://github.com/guoday/CCF-BDCI-Sentiment-Analysis-Baseline)
 5. [Bert base Chinese](https://github.com/google-research/bert)
+6. [ERNIE](https://github.com/PaddlePaddle/ERNIE/blob/develop/README.zh.md)
 
 ### Misc
 
