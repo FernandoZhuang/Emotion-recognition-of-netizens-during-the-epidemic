@@ -14,6 +14,7 @@
 4. [2020 CS224N convnet for NLP](http://web.stanford.edu/class/cs224n/slides/cs224n-2020-lecture11-convnets.pdf)
 5. [2020 CS224N convnet notes](http://web.stanford.edu/class/cs224n/readings/cs224n-2019-notes08-CNN.pdf)
 6. [NLP Progress Sentiment Analysis](https://github.com/sebastianruder/NLP-progress/blob/master/english/sentiment_analysis.md)
+7. [The Illustrated BERT, ELMo, and co](http://jalammar.github.io/illustrated-bert/)
 
 ### Resolution
 
