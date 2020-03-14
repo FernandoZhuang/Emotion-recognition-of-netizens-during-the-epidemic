@@ -1,4 +1,4 @@
-import Docs.utils as utils
+import my_setting.utils as utils
 import pandas as pd
 import os
 from enum import IntEnum
@@ -142,11 +142,17 @@ class DataCleaningToolSet:
         '''
         Label有各种噪音，暂时舍弃
         '''
-
         # TODO 等待讨论噪音标签的处理方法
-        def run(self, dataset: pd.DataFrame, n_cores=6):
-            cleaned_data=dataset[(dataset['sentiment'] == '0') | (dataset['sentiment'] == '1') | (dataset['sentiment'] == '-1')]
-            dataset._data = cleaned_data._data
+        def run(self, dataset: pd.DataFrame, n_cores=8):
+            #如果是test，则直接pass
+            if len(dataset.columns)==6:
+                cleaned_data = dataset[
+                    (dataset['sentiment'] == '0') | (dataset['sentiment'] == '1') | (dataset['sentiment'] == '-1')]
+                cleaned_data.sentiment = cleaned_data.sentiment.astype(int)
+                # 分类训练时，n_class >=0 & n_class <= max_classes
+                # 因此把-1映射到0,0映射到1,1映射到2
+                cleaned_data.sentiment = cleaned_data.sentiment + 1
+                dataset._data = cleaned_data._data
 
     @property
     def tools(self):
@@ -258,10 +264,10 @@ class UnlabeledDataset(Dataset):
 
 class TestDataset(Dataset):
 
-    def __init__(self, path: str = r'./data/nCoV_10k_test.csv'):
+    def __init__(self, path: str = utils.cfg.get('ORIGINAL_DATA', 'test_path')):
         Dataset.__init__(self, path, DatasetType.TEST)
 
-    def submit(self, path: str = r'./submit_file.csv'):
+    def submit(self, path: str = utils.cfg.get('PROCESSED_DATA', 'submit_csv_path')):
         """
         生成排行榜提交文件
         :param path: 排行榜文件的输出路径
@@ -271,7 +277,7 @@ class TestDataset(Dataset):
             writer = csv.DictWriter(f, ['id', 'y'])
             writer.writeheader()
             for idx, row in self.iterrows():
-                item = {'id': str(idx) + ' ', 'y': str(row['sentiment'])}
+                item = {'id': str(idx), 'y': str(row['sentiment'] - 1)}  # -1 是因为预测时标签为自然数，而提交结果却是-1,0,1
                 writer.writerow(item)
 
     def fill_result(self, res: list):
@@ -282,8 +288,11 @@ class TestDataset(Dataset):
         """
         if 'sentiment' in self.columns:
             self.drop('sentiment', inplace=True)
-        self.insert(-1, 'sentiment', res)
+        # 原始self.insert(-1,,,)报错unbounded slice
+        # http://sofasofa.io/forum_main_post.php?postid=1003010
+        self.insert(self.shape[1], 'sentiment', res)
 
-# if __name__ == '__main__':
-#     testset = LabeledDataset()
-#     print(testset.cleaned_data)
+
+if __name__ == '__main__':
+    testset = LabeledDataset()
+    print(testset.cleaned_data)
