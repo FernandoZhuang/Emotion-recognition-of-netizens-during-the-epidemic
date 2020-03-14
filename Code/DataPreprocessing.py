@@ -138,20 +138,21 @@ class DataCleaningToolSet:
                 dataset.drop('content', inplace=True, axis=1)
                 dataset.insert(2, 'content', res)
 
-    # class LabelCheck(DataCleaningStep):
-    #     '''
-    #     Label有各种噪音，暂时舍弃
-    #     '''
-    #
-    #     # TODO 等待讨论噪音标签的处理方法
-    #     def run(self, dataset: pd.DataFrame, n_cores=6):
-    #         cleaned_data = dataset[
-    #             (dataset['sentiment'] == '0') | (dataset['sentiment'] == '1') | (dataset['sentiment'] == '-1')]
-    #         cleaned_data.sentiment = cleaned_data.sentiment.astype(int)
-    #         # 分类训练时，n_class >=0 & n_class <= max_classes
-    #         # 因此把-1映射到0,0映射到1,1映射到2
-    #         cleaned_data.sentiment = cleaned_data.sentiment + 1
-    #         dataset._data = cleaned_data._data
+    class LabelCheck(DataCleaningStep):
+        '''
+        Label有各种噪音，暂时舍弃
+        '''
+        # TODO 等待讨论噪音标签的处理方法
+        def run(self, dataset: pd.DataFrame, n_cores=8):
+            #如果是test，则直接pass
+            if len(dataset.columns)==6:
+                cleaned_data = dataset[
+                    (dataset['sentiment'] == '0') | (dataset['sentiment'] == '1') | (dataset['sentiment'] == '-1')]
+                cleaned_data.sentiment = cleaned_data.sentiment.astype(int)
+                # 分类训练时，n_class >=0 & n_class <= max_classes
+                # 因此把-1映射到0,0映射到1,1映射到2
+                cleaned_data.sentiment = cleaned_data.sentiment + 1
+                dataset._data = cleaned_data._data
 
     @property
     def tools(self):
@@ -266,7 +267,7 @@ class TestDataset(Dataset):
     def __init__(self, path: str = utils.cfg.get('ORIGINAL_DATA', 'test_path')):
         Dataset.__init__(self, path, DatasetType.TEST)
 
-    def submit(self, path: str = r'../Output/Robert_wwm_ext/submit_file.csv'):
+    def submit(self, path: str = utils.cfg.get('PROCESSED_DATA', 'submit_csv_path')):
         """
         生成排行榜提交文件
         :param path: 排行榜文件的输出路径
@@ -276,7 +277,7 @@ class TestDataset(Dataset):
             writer = csv.DictWriter(f, ['id', 'y'])
             writer.writeheader()
             for idx, row in self.iterrows():
-                item = {'id': str(idx) + ' ', 'y': str(row['sentiment'] - 1)}  # -1 是因为预测时标签为自然数，而提交结果却是-1,0,1
+                item = {'id': str(idx), 'y': str(row['sentiment'] - 1)}  # -1 是因为预测时标签为自然数，而提交结果却是-1,0,1
                 writer.writerow(item)
 
     def fill_result(self, res: list):
