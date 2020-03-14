@@ -15,8 +15,8 @@ import datetime
 import random
 import multiprocessing
 import functools
-import Docs.utils as utils
-import Code.DataPreprocessing as dp
+import my_setting.utils as utils
+import DataPreprocessing as dp
 
 
 def token_encode_multiprocess(tokenizer, sentences):
@@ -57,10 +57,10 @@ def format_time(elapsed):
 if __name__ == '__main__':
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    test_set = dp.LabeledDataset()
-    test_data = test_set.cleaned_data
-    sentences, labels = test_data.content.values, test_data.sentiment.values
-    labels = labels.astype(np.int).tolist()
+    train_set = dp.LabeledDataset()
+    train_data = train_set.cleaned_data
+    sentences, labels = train_data.content.values, train_data.sentiment.values
+    labels = labels.tolist()
 
     tokenizer = transformers.BertTokenizer.from_pretrained(utils.cfg.get('PRETRAIN_MODEL', 'roberta_wwm_ext_path'))
     model = transformers.BertForSequenceClassification.from_pretrained(
@@ -112,7 +112,7 @@ if __name__ == '__main__':
                                                              num_training_steps=train_steps)
     # endregion
 
-    # region Train
+    #region Train and Eval
     random.seed(int(utils.cfg.get('HYPER_PARAMETER', 'seed')))
     np.random.seed(int(utils.cfg.get('HYPER_PARAMETER', 'seed')))
     torch.manual_seed(int(utils.cfg.get('HYPER_PARAMETER', 'seed')))
@@ -177,6 +177,14 @@ if __name__ == '__main__':
         print("  Accuracy: {0:.2f}".format(eval_accuracy / nb_eval_steps))
         print("  Validation took: {:}".format(format_time(time.time() - t0)))
         # endregion
-    # endregion
+    #endregion
+
+    #region Test
+    print('Predicting labels in test sentences...')
+    test_set = dp.TestDataset()
+    test_data = test_set.cleaned_data
+    sentences=test_data.content.values
+
+    #endregion
 
     print("Training complete!")

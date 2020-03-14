@@ -1,4 +1,4 @@
-import Docs.utils as utils
+import my_setting.utils as utils
 import pandas as pd
 import os
 from enum import IntEnum
@@ -145,7 +145,12 @@ class DataCleaningToolSet:
 
         # TODO 等待讨论噪音标签的处理方法
         def run(self, dataset: pd.DataFrame, n_cores=6):
-            cleaned_data=dataset[(dataset['sentiment'] == '0') | (dataset['sentiment'] == '1') | (dataset['sentiment'] == '-1')]
+            cleaned_data = dataset[
+                (dataset['sentiment'] == '0') | (dataset['sentiment'] == '1') | (dataset['sentiment'] == '-1')]
+            cleaned_data.sentiment = cleaned_data.sentiment.astype(int)
+            # 分类训练时，n_class >=0 & n_class <= max_classes
+            # 因此把-1映射到0,0映射到1,1映射到2
+            cleaned_data.sentiment = cleaned_data.sentiment + 1
             dataset._data = cleaned_data._data
 
     @property
@@ -284,6 +289,7 @@ class TestDataset(Dataset):
             self.drop('sentiment', inplace=True)
         self.insert(-1, 'sentiment', res)
 
-# if __name__ == '__main__':
-#     testset = LabeledDataset()
-#     print(testset.cleaned_data)
+
+if __name__ == '__main__':
+    testset = LabeledDataset()
+    print(testset.cleaned_data)
