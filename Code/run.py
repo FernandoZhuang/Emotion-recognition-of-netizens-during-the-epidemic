@@ -1,7 +1,9 @@
 '''
+creater: zhw
+updater: zhw
+created_time: 2020.3.12
+updated_time: 2020.3.14
 Learn from: https://mccormickml.com/2019/07/22/BERT-fine-tuning/#1-setup
-author: zhw
-time: 2020.3.12
 '''
 
 import torch
@@ -9,7 +11,9 @@ import torch.utils.data as tud
 import transformers
 import sklearn.model_selection as sms
 import numpy as np
+import pandas as pd
 
+import os
 import time
 import datetime
 import random
@@ -17,6 +21,7 @@ import multiprocessing
 import functools
 import my_setting.utils as utils
 import DataPreprocessing as dp
+import itertools
 
 
 def token_encode_multiprocess(tokenizer, sentences):
@@ -43,6 +48,41 @@ def token_encode(partial, sentences):
     return [partial(sent) for sent in sentences]
 
 
+def attention_mask(input_ids):
+    '''
+    记录哪些单词被mask
+    :param input_ids: Token ID
+    :return: list
+    '''
+    attention_masks = []
+    for sent in input_ids:
+        att_mask = [int(token_id > 0) for token_id in sent]
+        attention_masks.append(att_mask)
+
+    return attention_masks
+
+
+def create_itrator_for_dataset(input_ids=None, attention_masks=None, label_arg=None):
+    '''
+    把input_id,att_mask,label(如果有)转换成dataloader
+    :param kwargs:
+    :return: dataloader
+    '''
+    assert input_ids and attention_masks, f'input_ids,attention_masks必须被赋值!'
+
+    inputs, masks = torch.tensor(input_ids), torch.tensor(attention_masks)
+    if label_arg == None:
+        input_data = tud.TensorDataset(inputs, masks)
+    else:
+        labels = torch.tensor(label_arg)
+        input_data = tud.TensorDataset(inputs, masks, labels)
+
+    input_sampler = tud.SequentialSampler(input_data)
+
+    return tud.DataLoader(input_data, sampler=input_sampler,
+                          batch_size=int(utils.cfg.get('HYPER_PARAMETER', 'batch_size')))
+
+
 def flat_accuracy(preds, labels):
     pred_flat = np.argmax(preds, axis=1).flatten()
     label_flat = labels.flatten()
@@ -54,7 +94,7 @@ def format_time(elapsed):
     return str(datetime.timedelta(seconds=elapsed_rounded))
 
 
-if __name__ == '__main__':
+def train():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     train_set = dp.LabeledDataset()
@@ -62,18 +102,15 @@ if __name__ == '__main__':
     sentences, labels = train_data.content.values, train_data.sentiment.values
     labels = labels.tolist()
 
-    tokenizer = transformers.BertTokenizer.from_pretrained(utils.cfg.get('PRETRAIN_MODEL', 'roberta_wwm_ext_path'))
+    tokenizer = transformers.BertTokenizer.from_pretrained(utils.cfg.get('PRETRAIN_MODEL', 'original_roberta_wwm_ext_path'))
     model = transformers.BertForSequenceClassification.from_pretrained(
-        utils.cfg.get('PRETRAIN_MODEL', 'roberta_wwm_ext_path'), num_labels=3, output_attentions=False)
+        utils.cfg.get('PRETRAIN_MODEL', 'original_roberta_wwm_ext_path'), num_labels=3, output_attentions=False)
     model.cuda()
 
     # Tokenize
     input_ids = token_encode_multiprocess(tokenizer, sentences)
     # Attention Masks
-    attention_masks = []
-    for sent in input_ids:
-        att_mask = [int(token_id > 0) for token_id in sent]
-        attention_masks.append(att_mask)
+    attention_masks = attention_mask(input_ids)
 
     # region Train Vali Split
     train_inputs, validation_inputs, train_labels, validation_labels = sms.train_test_split(input_ids, labels,
@@ -87,23 +124,11 @@ if __name__ == '__main__':
                                                                    utils.cfg.get('HYPER_PARAMETER', 'test_size')))
     # endregion
 
-    # region Convert to Pytorch Datatypes
-    train_inputs, validation_inputs = torch.tensor(train_inputs), torch.tensor(validation_inputs)
-    train_labels, validation_labels = torch.tensor(train_labels), torch.tensor(validation_labels)
-    train_masks, validation_masks = torch.tensor(train_masks), torch.tensor(validation_masks)
-    # endregion
-
-    # region Create iterator for dataset
-    train_data = tud.TensorDataset(train_inputs, train_masks, train_labels)
-    train_sampler = tud.RandomSampler(train_data)
-    train_dataloader = tud.DataLoader(train_data, sampler=train_sampler,
-                                      batch_size=int(utils.cfg.get('HYPER_PARAMETER', 'batch_size')))
-
-    validation_data = tud.TensorDataset(validation_inputs, validation_masks, validation_labels)
-    validation_sampler = tud.RandomSampler(validation_data)
-    validation_dataloader = tud.DataLoader(validation_data, sampler=validation_sampler,
-                                           batch_size=int(utils.cfg.get('HYPER_PARAMETER', 'batch_size')))
-    # endregion
+    # Convert to Pytorch Datatypes
+    train_dataloader = create_itrator_for_dataset(input_ids=train_inputs, attention_masks=train_masks,
+                                                  label_arg=train_labels)
+    validation_dataloader = create_itrator_for_dataset(input_ids=validation_inputs, attention_masks=validation_masks,
+                                                       label_arg=validation_labels)
 
     # region Optimizer and Learning schduler
     optimizer = transformers.AdamW(model.parameters(), lr=2e-5, eps=1e-8)
@@ -112,7 +137,7 @@ if __name__ == '__main__':
                                                              num_training_steps=train_steps)
     # endregion
 
-    #region Train and Eval
+    # region Train and Eval
     random.seed(int(utils.cfg.get('HYPER_PARAMETER', 'seed')))
     np.random.seed(int(utils.cfg.get('HYPER_PARAMETER', 'seed')))
     torch.manual_seed(int(utils.cfg.get('HYPER_PARAMETER', 'seed')))
@@ -177,14 +202,61 @@ if __name__ == '__main__':
         print("  Accuracy: {0:.2f}".format(eval_accuracy / nb_eval_steps))
         print("  Validation took: {:}".format(format_time(time.time() - t0)))
         # endregion
-    #endregion
+    # endregion
+    print("Training complete!")
 
-    #region Test
+    # region Save Model
+    output_dir = '../Output/Robert_wwm_ext/'
+    if not os.path.exists(output_dir): os.makedirs(output_dir)
+
+    model_to_save = model.module if hasattr(model, 'module') else model
+    model_to_save.save_pretrained(output_dir)
+    tokenizer.save_pretrained(output_dir)
+
+    print("Saving model to %s" % output_dir)
+    # endregion
+
+
+def test():
     print('Predicting labels in test sentences...')
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    tokenizer = transformers.BertTokenizer.from_pretrained(utils.cfg.get('PRETRAIN_MODEL', 'fine_tuned_roberta_wwm_ext_path'))
+    model = transformers.BertForSequenceClassification.from_pretrained(
+        utils.cfg.get('PRETRAIN_MODEL', 'fine_tuned_roberta_wwm_ext_path'), num_labels=3, output_attentions=False)
+    model.cuda()
+
     test_set = dp.TestDataset()
     test_data = test_set.cleaned_data
-    sentences=test_data.content.values
+    sentences = test_data.content.values
 
-    #endregion
+    predcit_input_ids = token_encode_multiprocess(tokenizer, sentences)
+    predict_attention_masks = attention_mask(predcit_input_ids)
+    predict_dataloader = create_itrator_for_dataset(input_ids=predcit_input_ids,
+                                                    attention_masks=predict_attention_masks)
 
-    print("Training complete!")
+    model.eval()
+
+    predictions = []
+    for batch in predict_dataloader:
+        batch = tuple(t.to(device) for t in batch)
+
+        b_input_ids, b_input_mask = batch
+        with torch.no_grad(): outputs = model(b_input_ids, token_type_ids=None, attention_mask=b_input_mask)
+
+        logits = outputs[0]
+        logits = logits.detach().cpu().numpy()
+        predictions.append(logits)
+
+    predict_labels = []
+    for i in range(len(predictions)): predict_labels.append(np.argmax(predictions[i], axis=1).flatten().tolist())
+    test_set.fill_result(list(itertools.chain(*predict_labels)))#把多个list合并成一个list
+    test_set.submit()
+    print('    DONE.')
+
+
+if __name__ == '__main__':
+    train()
+
+    test()
