@@ -144,6 +144,16 @@ class DataCleaningToolSet:
             dataset.insert(2, 'content', res)
             p.close()
 
+    class LabelCheck(DataCleaningStep):
+        """
+        去除标签噪声
+        """
+        def run(self, dataset: pd.DataFrame, n_cores: int = 8):
+            cleaned_data = dataset[(dataset['sentiment'] == '0') | (dataset['sentiment'] == '-1') | (dataset['sentiment'] == '1')]
+            cleaned_data.sentiment = cleaned_data.sentiment.astype('int')
+            dataset._data = cleaned_data._data
+
+
     @property
     def tools(self):
         return self._tools
@@ -183,6 +193,7 @@ class Dataset(pd.DataFrame):
 
         self._cleaned_data = None
         self._cat_hashtags = None
+        self._emojis = None
 
         # 以下为注册要执行的数据清理工具部分
         self.tool_set = DataCleaningToolSet()
@@ -230,7 +241,7 @@ class Dataset(pd.DataFrame):
         if self._cat_hashtags is not None:
             return self._cat_hashtags
         else:
-            print('正在统计hashtag...', sep='')
+            print('正在统计hashtag...', end='')
             p = Pool(processes=n_core)
             res = p.map(self._find_hashtags, Batch(n_core, self.content.to_list()))
             res = p.map(self._list_reduce, Batch(3, res))
@@ -239,6 +250,33 @@ class Dataset(pd.DataFrame):
             print('完毕')
             return self._cat_hashtags
 
+    def _extract_emoji(self, x):
+        ret = []
+        for idx, row in x:
+            res = re.findall(r'\[.+?\]', str(row))
+            res = list(set(filter(lambda x:0 < len(x) <= 6, res)))
+            if len(res) > 0:
+                ret.append((idx, res))
+        return ret
+
+
+    @property
+    def emojis(self):
+        """
+        提取emoji表情
+        :return:
+        """
+        n_core = 8
+        if self._emojis is not None:
+            return self._emojis
+        else:
+            print('正在提取emoji...', end='')
+            p = Pool(processes=n_core)
+            res = p.map(self._extract_emoji, Batch(n_core, list(self.content.to_dict().items())))
+            res = reduce(lambda x, y: x + y, res)
+            self._emojis = res
+            print('完毕')
+            return self._emojis
 
 class LabeledDataset(Dataset):
 
@@ -267,7 +305,7 @@ class TestDataset(Dataset):
             writer = csv.DictWriter(f, ['id', 'y'])
             writer.writeheader()
             for idx, row in self.iterrows():
-                item = {'id': str(idx) + ' ', 'y': str(row['sentiment'])}
+                item = {'id': str(idx), 'y': str(row['sentiment'])}
                 writer.writerow(item)
 
     def fill_result(self, res: list):
@@ -283,4 +321,4 @@ class TestDataset(Dataset):
 
 if __name__ == '__main__':
     testset = LabeledDataset()
-    print(testset.stat_hashtags)
+    print(testset.cleaned_data.sentiment)

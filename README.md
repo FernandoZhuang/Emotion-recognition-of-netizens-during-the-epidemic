@@ -22,3 +22,11 @@
     - 繁体中文转简体中文
 ## 统计
 1. 属性stat_hashtags用来提取不与微博关联的所有hashtag与该hashtag出现的次数
+
+
+## 参考文献
+1. https://arxiv.org/pdf/1908.10084.pdf, Sentence-BERT: Sentence Embeddings using Siamese BERT-Networks
+2. https://github.com/UKPLab/sentence-transformers
+3. https://medium.com/genei-technology/richer-sentence-embeddings-using-sentence-bert-part-i-ce1d9e0b1343
+4. https://mccormickml.com/2019/05/14/BERT-word-embeddings-tutorial/
+5. https://github.com/andrewgordonwilson/bayesgan
