@@ -25,7 +25,8 @@ class DataCleaningStep(metaclass=ABCMeta):
         start_time = time.time()
         self.run(args[0])
         end_time = time.time()
-        print(f'已执行数据清洗步骤：{self.__doc__.strip()}，用时：{round(end_time - start_time, 2)}s')
+        # Unlabeled数据集不应该输出LabelCheck信息
+        if (len(args[0].columns) == 6): print(f'已执行数据清洗步骤：{self.__doc__.strip()}，用时：{round(end_time - start_time, 2)}s')
 
     @abc.abstractmethod
     def run(self, dataset: pd.DataFrame, n_cores: int = 8):
@@ -142,10 +143,11 @@ class DataCleaningToolSet:
         '''
         Label有各种噪音，暂时舍弃
         '''
+
         # TODO 等待讨论噪音标签的处理方法
         def run(self, dataset: pd.DataFrame, n_cores=8):
-            #如果是test，则直接pass
-            if len(dataset.columns)==6:
+            # 如果是test，则直接pass
+            if len(dataset.columns) == 6:
                 cleaned_data = dataset[
                     (dataset['sentiment'] == '0') | (dataset['sentiment'] == '1') | (dataset['sentiment'] == '-1')]
                 cleaned_data.sentiment = cleaned_data.sentiment.astype(int)

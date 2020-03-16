@@ -102,9 +102,10 @@ def train():
     sentences, labels = train_data.content.values, train_data.sentiment.values
     labels = labels.tolist()
 
-    tokenizer = transformers.BertTokenizer.from_pretrained(utils.cfg.get('PRETRAIN_MODEL', 'original_roberta_wwm_ext_path'))
-    model = transformers.BertForSequenceClassification.from_pretrained(
-        utils.cfg.get('PRETRAIN_MODEL', 'original_roberta_wwm_ext_path'), num_labels=3, output_attentions=False)
+    tokenizer = transformers.XLNetTokenizer.from_pretrained(
+        utils.cfg.get('PRETRAIN_MODEL', 'original_xlnet_base_path'))
+    model = transformers.XLNetForSequenceClassification.from_pretrained(
+        utils.cfg.get('PRETRAIN_MODEL', 'original_xlnet_base_path'), num_labels=3, output_attentions=False)
     model.cuda()
 
     # Tokenize
@@ -206,7 +207,7 @@ def train():
     print("Training complete!")
 
     # region Save Model
-    output_dir = '../Output/Robert_wwm_ext/'
+    output_dir = utils.cfg.get('PRETRAIN_MODEL', 'fine_tuned_xlnet_base_path')
     if not os.path.exists(output_dir): os.makedirs(output_dir)
 
     model_to_save = model.module if hasattr(model, 'module') else model
@@ -222,9 +223,10 @@ def test():
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    tokenizer = transformers.BertTokenizer.from_pretrained(utils.cfg.get('PRETRAIN_MODEL', 'fine_tuned_roberta_wwm_ext_path'))
-    model = transformers.BertForSequenceClassification.from_pretrained(
-        utils.cfg.get('PRETRAIN_MODEL', 'fine_tuned_roberta_wwm_ext_path'), num_labels=3, output_attentions=False)
+    tokenizer = transformers.XLNetTokenizer.from_pretrained(
+        utils.cfg.get('PRETRAIN_MODEL', 'fine_tuned_xlnet_base_path'))
+    model = transformers.XLNetForSequenceClassification.from_pretrained(
+        utils.cfg.get('PRETRAIN_MODEL', 'fine_tuned_xlnet_base_path'), num_labels=3, output_attentions=False)
     model.cuda()
 
     test_set = dp.TestDataset()
@@ -251,12 +253,12 @@ def test():
 
     predict_labels = []
     for i in range(len(predictions)): predict_labels.append(np.argmax(predictions[i], axis=1).flatten().tolist())
-    test_set.fill_result(list(itertools.chain(*predict_labels)))#把多个list合并成一个list
+    test_set.fill_result(list(itertools.chain(*predict_labels)))  # 把多个list合并成一个list
     test_set.submit()
     print('    DONE.')
 
 
 if __name__ == '__main__':
-    train()
+    # train()
 
     test()
