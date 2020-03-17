@@ -80,7 +80,24 @@ def create_itrator_for_dataset(input_ids=None, attention_masks=None, label_arg=N
     input_sampler = tud.SequentialSampler(input_data)
 
     return tud.DataLoader(input_data, sampler=input_sampler,
-                          batch_size=int(utils.cfg.get('HYPER_PARAMETER', 'batch_size')))
+                          batch_size=int(utils.cfg.get('HYPER_PARAMETER', 'batch_size')), num_workers=4)
+
+
+def last_three_hidden_layer(hidden_layers, labels=None):
+    last_cat = torch.cat(
+        (hidden_layers[-1][:, 0], hidden_layers[-2][:, 0], hidden_layers[-3][:, 0]), 1)
+    linear_layer = torch.nn.Linear(768 * 3, 3).cuda()
+    logits = linear_layer(last_cat)
+
+    if labels is not None:
+        loss_fct = torch.nn.CrossEntropyLoss().cuda()
+        loss = loss_fct(logits.view(-1, 3), labels.view(-1))
+        outputs = [loss, ]
+        outputs = outputs + [torch.nn.functional.softmax(logits, -1).cuda()]
+    else:
+        outputs = torch.nn.Softmax(logits, -1).cuda()
+
+    return outputs
 
 
 def flat_accuracy(preds, labels):
@@ -96,16 +113,19 @@ def format_time(elapsed):
 
 def train():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    torch.cuda.empty_cache()
 
     train_set = dp.LabeledDataset()
     train_data = train_set.cleaned_data
     sentences, labels = train_data.content.values, train_data.sentiment.values
     labels = labels.tolist()
 
-    tokenizer = transformers.XLNetTokenizer.from_pretrained(
-        utils.cfg.get('PRETRAIN_MODEL', 'original_xlnet_base_path'))
-    model = transformers.XLNetForSequenceClassification.from_pretrained(
-        utils.cfg.get('PRETRAIN_MODEL', 'original_xlnet_base_path'), num_labels=3, output_attentions=False)
+    config = transformers.BertConfig.from_pretrained(utils.cfg.get('PRETRAIN_MODEL', 'original_roberta_wwm_ext_path'),
+                                                     num_labels=3, output_attentions=False, output_hidden_states=True)
+    tokenizer = transformers.BertTokenizer.from_pretrained(
+        utils.cfg.get('PRETRAIN_MODEL', 'original_roberta_wwm_ext_path'))
+    model = transformers.BertForSequenceClassification.from_pretrained(
+        utils.cfg.get('PRETRAIN_MODEL', 'original_roberta_wwm_ext_path'), config=config)
     model.cuda()
 
     # Tokenize
@@ -165,8 +185,9 @@ def train():
             b_labels = batch[2].to(device)
 
             model.zero_grad()
+            # token_type_ids论文中用于判断next sentences
             outputs = model(b_input_ids, token_type_ids=None, attention_mask=b_input_mask, labels=b_labels)
-            loss = outputs[0]
+            loss, _ = last_three_hidden_layer(outputs[2], b_labels)
             total_loss += loss.item()
             loss.backward()
             torch.nn.utils.clip_grad_norm(model.parameters(), 1.0)
@@ -192,7 +213,8 @@ def train():
 
             with torch.no_grad():
                 outputs = model(b_input_ids, token_type_ids=None, attention_mask=b_input_mask)
-                logits = outputs[0]
+                # 此处outputs index取值和train时不一样，需要注意, 因为不需要计算loss回传
+                loss, logits = last_three_hidden_layer(outputs[1], b_labels)
                 logits = logits.detach().cpu().numpy()
                 label_ids = b_labels.to('cpu').numpy()
 
@@ -207,7 +229,7 @@ def train():
     print("Training complete!")
 
     # region Save Model
-    output_dir = utils.cfg.get('PRETRAIN_MODEL', 'fine_tuned_xlnet_base_path')
+    output_dir = '../Output/Robert_wwm_ext/'
     if not os.path.exists(output_dir): os.makedirs(output_dir)
 
     model_to_save = model.module if hasattr(model, 'module') else model
@@ -223,10 +245,10 @@ def test():
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    tokenizer = transformers.XLNetTokenizer.from_pretrained(
-        utils.cfg.get('PRETRAIN_MODEL', 'fine_tuned_xlnet_base_path'))
-    model = transformers.XLNetForSequenceClassification.from_pretrained(
-        utils.cfg.get('PRETRAIN_MODEL', 'fine_tuned_xlnet_base_path'), num_labels=3, output_attentions=False)
+    tokenizer = transformers.BertTokenizer.from_pretrained(
+        utils.cfg.get('PRETRAIN_MODEL', 'fine_tuned_roberta_wwm_ext_path'))
+    model = transformers.BertForSequenceClassification.from_pretrained(
+        utils.cfg.get('PRETRAIN_MODEL', 'fine_tuned_roberta_wwm_ext_path'), num_labels=3, output_attentions=False)
     model.cuda()
 
     test_set = dp.TestDataset()
@@ -259,6 +281,6 @@ def test():
 
 
 if __name__ == '__main__':
-    # train()
+    train()
 
     test()
