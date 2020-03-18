@@ -2,7 +2,7 @@
 creater: zhw
 updater: zhw
 created_time: 2020.3.12
-updated_time: 2020.3.14
+updated_time: 2020.3.18
 Learn from: https://mccormickml.com/2019/07/22/BERT-fine-tuning/#1-setup
 '''
 
@@ -95,7 +95,7 @@ def last_three_hidden_layer(hidden_layers, labels=None):
         outputs = [loss, ]
         outputs = outputs + [torch.nn.functional.softmax(logits, -1).cuda()]
     else:
-        outputs = torch.nn.Softmax(logits, -1).cuda()
+        outputs = torch.nn.functional.softmax(logits, -1).cuda()
 
     return outputs
 
@@ -245,10 +245,12 @@ def test():
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+    config = transformers.BertConfig.from_pretrained(utils.cfg.get('PRETRAIN_MODEL', 'fine_tuned_roberta_wwm_ext_path'),
+                                                     num_labels=3, output_attentions=False, output_hidden_states=True)
     tokenizer = transformers.BertTokenizer.from_pretrained(
         utils.cfg.get('PRETRAIN_MODEL', 'fine_tuned_roberta_wwm_ext_path'))
     model = transformers.BertForSequenceClassification.from_pretrained(
-        utils.cfg.get('PRETRAIN_MODEL', 'fine_tuned_roberta_wwm_ext_path'), num_labels=3, output_attentions=False)
+        utils.cfg.get('PRETRAIN_MODEL', 'fine_tuned_roberta_wwm_ext_path'), config=config)
     model.cuda()
 
     test_set = dp.TestDataset()
@@ -269,13 +271,12 @@ def test():
         b_input_ids, b_input_mask = batch
         with torch.no_grad(): outputs = model(b_input_ids, token_type_ids=None, attention_mask=b_input_mask)
 
-        logits = outputs[0]
+        logits = last_three_hidden_layer(outputs[1])
         logits = logits.detach().cpu().numpy()
+        logits = np.argmax(logits, axis=1).flatten()
         predictions.append(logits)
 
-    predict_labels = []
-    for i in range(len(predictions)): predict_labels.append(np.argmax(predictions[i], axis=1).flatten().tolist())
-    test_set.fill_result(list(itertools.chain(*predict_labels)))  # 把多个list合并成一个list
+    test_set.fill_result(list(itertools.chain(*predictions)))  # 把多个list合并成一个list
     test_set.submit()
     print('    DONE.')
 
