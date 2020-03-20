@@ -2,8 +2,10 @@
 creater: zhw
 updater: zhw
 created_time: 2020.3.12
-updated_time: 2020.3.18
-Learn from: https://mccormickml.com/2019/07/22/BERT-fine-tuning/#1-setup
+updated_time: 2020.3.20
+Learn from:
+https://mccormickml.com/2019/07/22/BERT-fine-tuning/#1-setup
+https://towardsdatascience.com/bert-classifier-just-another-pytorch-model-881b3cf05784
 '''
 
 import torch
@@ -22,61 +24,6 @@ import functools
 import my_setting.utils as utils
 import DataPreprocessing as dp
 import itertools
-
-
-class BertForSeqClassification(torch.nn.Module):
-    def __init__(self, hidden_layers=None, pool_out=None, labels=3):
-        '''
-        :param hidden_layers:
-        :param pool_out:
-        :param labels:
-        '''
-        super(BertForSeqClassification, self).__init__()
-        self._hidden_size = 768
-        self.hidden_layers, self.pool_out, self.labels = hidden_layers, pool_out, labels
-
-        self._config = transformers.BertConfig.from_pretrained(
-            utils.cfg.get('PRETRAIN_MODEL', 'original_roberta_wwm_ext_path'), num_labels=self.labels,
-            output_attentions=False,
-            output_hidden_states=True)
-        self.bert = transformers.BertForSequenceClassification.from_pretrained(
-            utils.cfg.get('PRETRAIN_MODEL', 'original_roberta_wwm_ext_path'), config=self._config)
-
-        self.dropout = torch.nn.Dropout(float(utils.cfg.get('HYPER_PARAMETER', 'hidden_dropout_prob')))
-        self.loss = torch.nn.CrossEntropyLoss()
-        if self.hidden_layers is not None: torch.nn.init.xavier_normal_(self.classifier.weight)
-
-    @property
-    def classifier(self):
-        if self.hidden_layers is None:
-            return None
-        elif self.pool_out is None:
-            return torch.nn.Linear(self._hidden_size * self.hidden_layers, self.labels)
-        else:
-            return torch.nn.Linear(self._hidden_size * self.hidden_layers + self.labels, self.labels)
-
-    def forward(self, b_input_ids, attention_mask, label_vec=None):
-        outputs = self.bert(b_input_ids, token_type_ids=None, attention_mask=attention_mask, labels=label_vec)
-
-        if self.hidden_layers is not None:
-            outputs = self._concatenate_hidden_layer_pool_out(outputs, label_vec)
-
-        return outputs
-
-    def _concatenate_hidden_layer_pool_out(self, original_output, label_vec):
-        cat_seq = (original_output[1],) if self.pool_out is not None else ()
-        cat_seq = cat_seq + (original_output[2][-(i + 1)][:, 0] for i in self.hidden_layers)
-        last_cat = torch.cat(cat_seq, 1)
-        logits = self.classifier(last_cat)
-
-        if self.labels is not None:
-            loss = self.loss(logits.view(-1, self.labels), label_vec.view(-1))
-            outputs = [loss, ]
-            outputs = outputs + [torch.nn.functional.softmax(logits, -1)]
-        else:
-            outputs = torch.nn.functional.softmax(logits, -1)
-
-        return outputs
 
 
 class Dataset():
@@ -186,22 +133,62 @@ class LabeledDataset(Dataset):
         return train_dataloader, validation_dataloader
 
 
-def seed():
-    random.seed(int(utils.cfg.get('HYPER_PARAMETER', 'seed')))
-    np.random.seed(int(utils.cfg.get('HYPER_PARAMETER', 'seed')))
-    torch.manual_seed(int(utils.cfg.get('HYPER_PARAMETER', 'seed')))
-    torch.cuda.manual_seed_all(int(utils.cfg.get('HYPER_PARAMETER', 'seed')))
+class BertForSeqClassification(torch.nn.Module):
+    def __init__(self, hidden_layers=None, pool_out=None, labels=3):
+        '''
+        :param hidden_layers:
+        :param pool_out:
+        :param labels:
+        '''
+        super(BertForSeqClassification, self).__init__()
+        self._hidden_size = 768
+        self.hidden_layers, self.pool_out, self.labels = hidden_layers, pool_out, labels
 
+        self._config = transformers.BertConfig.from_pretrained(
+            utils.cfg.get('PRETRAIN_MODEL', 'original_roberta_wwm_ext_path'), num_labels=self.labels,
+            output_attentions=False,
+            output_hidden_states=True)
+        self.bert = transformers.BertForSequenceClassification.from_pretrained(
+            utils.cfg.get('PRETRAIN_MODEL', 'original_roberta_wwm_ext_path'), config=self._config)
 
-def flat_accuracy(preds, labels):
-    pred_flat = np.argmax(preds, axis=1).flatten()
-    label_flat = labels.flatten()
-    return np.sum(pred_flat == label_flat) / len(label_flat)
+        self.dropout = torch.nn.Dropout(float(utils.cfg.get('HYPER_PARAMETER', 'hidden_dropout_prob')))
+        self.loss = torch.nn.CrossEntropyLoss()
+        if self.hidden_layers is not None: torch.nn.init.xavier_normal_(self.classifier.weight)
 
+    @property
+    def classifier(self):
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-def format_time(elapsed):
-    elapsed_rounded = int(round((elapsed)))
-    return str(datetime.timedelta(seconds=elapsed_rounded))
+        if self.hidden_layers is None:
+            return None
+        elif self.pool_out is None:
+            return torch.nn.Linear(self._hidden_size * self.hidden_layers, self.labels).to(device)
+        else:
+            return torch.nn.Linear(self._hidden_size * self.hidden_layers + self.labels, self.labels).to(device)
+
+    def forward(self, b_input_ids, attention_mask, label_vec=None):
+        outputs = self.bert(b_input_ids, token_type_ids=None, attention_mask=attention_mask, labels=label_vec)
+
+        if self.hidden_layers is not None:
+            outputs = self._concatenate_hidden_layer_pool_out(outputs, label_vec)
+
+        return outputs
+
+    def _concatenate_hidden_layer_pool_out(self, original_output, label_vec):
+        cat_seq = (original_output[-2],) if self.pool_out is not None else ()
+        # 之所以用-1索引，应对train, vali不同情景下origianl_output是否含有loss成员，导致hidder_layer索引可变
+        cat_seq = cat_seq + tuple(original_output[-1][-(i + 1)][:, 0] for i in range(self.hidden_layers))
+        last_cat = torch.cat(cat_seq, 1)
+        logits = self.classifier(last_cat)
+
+        if label_vec is not None:
+            loss = self.loss(logits.view(-1, self.labels), label_vec.view(-1))
+            outputs = [loss, ]
+            outputs = outputs + [torch.nn.functional.softmax(logits, -1)]
+        else:
+            outputs = [torch.nn.functional.softmax(logits, -1)]
+
+        return outputs
 
 
 def train():
@@ -210,6 +197,7 @@ def train():
 
     ld = LabeledDataset(preprocessed_data=dp.LabeledDataset(), tokenizer=None)
     # 如果要拼接隐藏层和pool out，此处实例化需要相应传参数
+    # model = BertForSeqClassification(hidden_layers=3, pool_out=True, labels=3).to(device)
     model = BertForSeqClassification(labels=3).to(device)
     loss_values = []
 
@@ -333,6 +321,24 @@ def test():
     test_set.fill_result(list(itertools.chain(*predict_labels)))  # 把多个list合并成一个list
     test_set.submit()
     print('    DONE.')
+
+
+def seed():
+    random.seed(int(utils.cfg.get('HYPER_PARAMETER', 'seed')))
+    np.random.seed(int(utils.cfg.get('HYPER_PARAMETER', 'seed')))
+    torch.manual_seed(int(utils.cfg.get('HYPER_PARAMETER', 'seed')))
+    torch.cuda.manual_seed_all(int(utils.cfg.get('HYPER_PARAMETER', 'seed')))
+
+
+def flat_accuracy(preds, labels):
+    pred_flat = np.argmax(preds, axis=1).flatten()
+    label_flat = labels.flatten()
+    return np.sum(pred_flat == label_flat) / len(label_flat)
+
+
+def format_time(elapsed):
+    elapsed_rounded = int(round((elapsed)))
+    return str(datetime.timedelta(seconds=elapsed_rounded))
 
 
 if __name__ == '__main__':
