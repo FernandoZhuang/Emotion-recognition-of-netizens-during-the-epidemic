@@ -26,8 +26,9 @@ class DataCleaningStep(metaclass=ABCMeta):
         start_time = time.time()
         self.run(args[0])
         end_time = time.time()
-        # Unlabeled数据集不应该输出LabelCheck信息
-        if (len(args[0].columns) == 6): print(f'已执行数据清洗步骤：{self.__doc__.strip()}，用时：{round(end_time - start_time, 2)}s')
+        # Unlabeled数据集不应该执行且输出LabelCheck信息
+        if (len(args[0].columns) == 6 or args[1] != 'LabelCheck'):
+            print(f'已执行数据清洗步骤：{self.__doc__.strip()}，用时：{round(end_time - start_time, 2)}s')
 
     @abc.abstractmethod
     def run(self, dataset: pd.DataFrame, n_cores: int = 8):
@@ -228,7 +229,7 @@ class Dataset(pd.DataFrame):
         else:
             self._cleaned_data = self.copy(deep=True)
             for tool in self.registered_tools:
-                self.tool_set[tool](self._cleaned_data)
+                self.tool_set[tool](self._cleaned_data, tool)
             return self._cleaned_data
 
     def _find_hashtags(self, x):
