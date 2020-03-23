@@ -265,8 +265,8 @@ class Dataset(pd.DataFrame):
 
 class LabeledDataset(Dataset):
 
-    def __init__(self, path: str = utils.cfg.get('ORIGINAL_DATA', 'simplify_weibo_360k_path')):
-        Dataset.__init__(self, path, DatasetType.SENTIMENTRELEVENTCORPUS)
+    def __init__(self, path: str = utils.cfg.get('ORIGINAL_DATA', 'train_labeled_path')):
+        Dataset.__init__(self, path, DatasetType.LABELED)
 
 
 class UnlabeledDataset(Dataset):
@@ -277,7 +277,7 @@ class UnlabeledDataset(Dataset):
 
 class TestDataset(Dataset):
 
-    def __init__(self, path: str = utils.cfg.get('ORIGINAL_DATA', 'test_path')):
+    def __init__(self, path: str = utils.cfg.get('ORIGINAL_DATA', 'train_unlabeled_path')):
         Dataset.__init__(self, path, DatasetType.TEST)
 
     def submit(self, path: str = utils.cfg.get('PROCESSED_DATA', 'submit_csv_path')):

@@ -19,6 +19,7 @@ import os
 import time
 import datetime
 import random
+import tqdm
 import multiprocessing
 import functools
 import my_setting.utils as utils
@@ -283,8 +284,10 @@ def train():
     if not os.path.exists(output_dir): os.makedirs(output_dir)
 
     model_to_save = model.module if hasattr(model, 'module') else model
-    model_to_save.save_pretrained(output_dir)
-    ld.tokenizer.save_pretrained(output_dir)
+    # 自定义模型无save_pretrained方法
+    # model_to_save.save_pretrained(output_dir)
+    output_file = os.path.join(output_dir, 'pytorch_model.bin')
+    torch.save(model_to_save.state_dict(), output_file)
 
     print("Saving model to %s" % output_dir)
     # endregion
@@ -306,7 +309,7 @@ def test():
     predict_dataloader = ul.get_dataloader()
 
     predictions = []
-    for batch in predict_dataloader:
+    for batch in tqdm.tqdm(predict_dataloader):
         batch = tuple(t.to(device) for t in batch)
 
         b_input_ids, b_input_mask = batch
@@ -342,6 +345,6 @@ def format_time(elapsed):
 
 
 if __name__ == '__main__':
-    train()
+    # train()
 
     test()
