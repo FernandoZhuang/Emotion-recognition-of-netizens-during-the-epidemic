@@ -2,7 +2,7 @@
 
 ## Mindmap
 
-![Mindmap](Docs/安排.png)
+![Mindmap](Docs/工作安排.png)
 
 ## Material
 
