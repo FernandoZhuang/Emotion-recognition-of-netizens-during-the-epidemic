@@ -186,19 +186,22 @@ class BertForSeqClassification(torch.nn.Module):
             loss = self.loss(logits.view(-1, self.labels), label_vec.view(-1))
             outputs = [loss, ]
             outputs = outputs + [torch.nn.functional.softmax(logits, -1)]
+            # outputs = outputs + [logits]
         else:
             outputs = [torch.nn.functional.softmax(logits, -1)]
+            # outputs=[logits]
 
         return outputs
 
 
 def train():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    tf_flag = str(utils.cfg.get('HYPER_PARAMETER', 'from_tf'))
     seed()
 
     ld = LabeledDataset(preprocessed_data=dp.LabeledDataset(), tokenizer=None)
     # 如果要拼接隐藏层和pool out，此处实例化需要相应传参数
-    # model = BertForSeqClassification(hidden_layers=3, pool_out=True, labels=3).to(device)
+    #model = BertForSeqClassification(hidden_layers=2, pool_out=True, labels=3).to(device)
     model = BertForSeqClassification(labels=3).to(device)
     loss_values = []
 
@@ -292,6 +295,31 @@ def train():
     print("Saving model to %s" % output_dir)
     # endregion
 
+    # region Test
+    model.eval()
+
+    test_set = dp.TestDataset()
+    ul = Dataset(test_set)
+    predict_dataloader = ul.get_dataloader()
+
+    predictions = []
+    for batch in tqdm.tqdm(predict_dataloader):
+        batch = tuple(t.to(device) for t in batch)
+
+        b_input_ids, b_input_mask = batch
+        with torch.no_grad(): outputs = model(b_input_ids, attention_mask=b_input_mask)
+
+        logits = outputs[0]
+        logits = logits.detach().cpu().numpy()
+        predictions.append(logits)
+
+    predict_labels = []
+    for i in range(len(predictions)): predict_labels.append(np.argmax(predictions[i], axis=1).flatten().tolist())
+    test_set.fill_result(list(itertools.chain(*predict_labels)))  # 把多个list合并成一个list
+    test_set.submit()
+    print('    DONE.')
+    # endregion
+
 
 def test():
     print('Predicting labels in test sentences...')
@@ -299,9 +327,7 @@ def test():
 
     tokenizer = transformers.BertTokenizer.from_pretrained(
         utils.cfg.get('PRETRAIN_MODEL', 'fine_tuned_roberta_wwm_ext_path'))
-    model = transformers.BertForSequenceClassification.from_pretrained(
-        utils.cfg.get('PRETRAIN_MODEL', 'fine_tuned_roberta_wwm_ext_path'), num_labels=3, output_attentions=False)
-    model.to(device)
+    model = BertForSeqClassification(labels=3).to(device)
     model.eval()
 
     test_set = dp.TestDataset()
@@ -345,6 +371,6 @@ def format_time(elapsed):
 
 
 if __name__ == '__main__':
-    # train()
+    train()
 
-    test()
+    # test()
