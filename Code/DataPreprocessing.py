@@ -191,8 +191,8 @@ class Dataset(pd.DataFrame):
                 self.index.name = 'ID'
             elif type_ == DatasetType.UNLABELED:
                 dateparser = lambda x: pd.datetime.strptime(x, '%m月%d日 %H:%M')
-                self._data = pd.read6_csv(path, index_col=['微博id'], parse_dates=['微博发布时间'],
-                                          date_parser=dateparser)._data
+                self._data = pd.read_csv(path, index_col=['微博id'], parse_dates=['微博发布时间'],
+                                         date_parser=dateparser)._data
                 print('已读入未标注数据集')
                 self.columns = ['datetime', 'poster', 'content', 'image', 'video']
                 self.index.name = 'ID'
@@ -272,33 +272,8 @@ class LabeledDataset(Dataset):
 
 class UnlabeledDataset(Dataset):
 
-    def __init__(self, path: str = r'./data/nCoV_900k_train.unlabled.csv'):
+    def __init__(self, path: str = utils.cfg.get('ORIGINAL_DATA', 'train_unlabeled_path')):
         Dataset.__init__(self, path, DatasetType.UNLABELED)
-
-    def sample_add_sentiment(self):
-        '''
-        数据的输入是用模型打好了伪标签的900k csv（testdataset.submit函数生成）和原始900k csv
-        目的是按一定比例抽样，获取900k csv中的一部分映射了标签的数据，送入模型和100k结合再训练
-        参考https://stackoverflow.com/questions/37047420/how-to-drop-rows-of-pandas-dataframe-with-same-value-based-on-condition-in-diffe
-        '''
-        sentiment_polar = pd.read_csv(utils.cfg.get('PROCESSED_DATA', 'submit_csv_path'), encoding='utf-8')
-        train_unlabel = pd.read_csv(utils.cfg.get('ORIGINAL_DATA', 'train_unlabeled_path'), encoding='utf-8')
-        train_unlabel.columns = ['ID', 'datetime', 'poster', 'content', 'image', 'video']
-
-        sentiment_sample = sentiment_polar.sample(frac=0.1)  # frac是抽样比例
-        sentiment_sample.sort_values('id', inplace=True)
-        train_unlabel_sample = train_unlabel.loc[train_unlabel['ID'].isin(sentiment_sample['id'].to_list())]
-        train_unlabel_sample.sort_values('ID', inplace=True)  # 两次sort是为映射标签做准备
-        # 保留ID第一次重复的行，其余重复行全部删除
-        train_unlabel_sample.drop_duplicates(subset=['ID'], keep='first', inplace=True)
-        # 注释部分是删除所有重复ID对应行，不保留
-        # duplicated_row=train_unlabel_sample.loc[train_unlabel_sample['ID'].duplicated(keep='first'),'ID']
-        # unlabel_isin=train_unlabel_sample['ID'].isin(duplicated_row.unique())
-        # unlabel_index=train_unlabel_sample.index[unlabel_isin]
-        # train_unlabel_sample.drop(unlabel_index, inplace=True)
-
-        train_unlabel_sample.insert(loc=6, column='sentiment', value=sentiment_sample['y'].to_list())
-        train_unlabel_sample.to_csv('unlabel_sample.csv', index=False)
 
 
 class TestDataset(Dataset):
@@ -368,6 +343,49 @@ def sentiment_relevent_corpus():
     senti.to_csv('simplify_weibo_360k.csv', index=False)
     # endregion
 
-# if __name__ == '__main__':
+
+def sample_add_sentiment():
+    '''
+    数据的输入是用模型打好了伪标签的900k csv（testdataset.submit函数生成）和原始900k csv
+    目的是按一定比例抽样，获取900k csv中的一部分映射了标签的数据，送入模型和100k结合再训练
+    参考https://stackoverflow.com/questions/37047420/how-to-drop-rows-of-pandas-dataframe-with-same-value-based-on-condition-in-diffe
+    '''
+    # TODO 由于UnlabelDataset初始化得先读入900k等一系列操作，耗时大，暂时不放在UnlabelDataset，等待未来优化
+    # TODO 随机采样，有一定概率在train_unlabel_sample.insert报错Length of values does not match length of index
+    # 暂时解决方案：重试。等待完善删除所有重复
+
+    sentiment_polar = pd.read_csv(utils.cfg.get('PROCESSED_DATA', 'submit_csv_path'), encoding='utf-8')
+    train_unlabel = pd.read_csv(utils.cfg.get('ORIGINAL_DATA', 'train_unlabeled_path'), encoding='utf-8')
+    train_unlabel.columns = ['ID', 'datetime', 'poster', 'content', 'image', 'video']
+
+    sentiment_sample = sentiment_polar.sample(frac=0.1)  # frac是抽样比例
+    sentiment_sample.sort_values('id', inplace=True)
+    train_unlabel_sample = train_unlabel.loc[train_unlabel['ID'].isin(sentiment_sample['id'].to_list())]
+    train_unlabel_sample.sort_values('ID', inplace=True)  # 两次sort是为映射标签做准备
+    # 保留ID第一次重复的行，其余重复行全部删除
+    train_unlabel_sample.drop_duplicates(subset=['ID'], keep='first', inplace=True)
+    # 注释部分是删除所有重复ID对应行，不保留
+    # duplicated_row=train_unlabel_sample.loc[train_unlabel_sample['ID'].duplicated(keep='first'),'ID']
+    # unlabel_isin=train_unlabel_sample['ID'].isin(duplicated_row.unique())
+    # unlabel_index=train_unlabel_sample.index[unlabel_isin]
+    # train_unlabel_sample.drop(unlabel_index, inplace=True)
+
+    train_unlabel_sample.insert(loc=6, column='sentiment', value=sentiment_sample['y'].to_list())
+    train_unlabel_sample.to_csv(utils.cfg.get('PROCESSED_DATA', 'unlabel_sample_path'), index=False)
+
+    # 合并文件
+    li = []
+    label = pd.read_csv(utils.cfg.get('ORIGINAL_DATA', 'train_labeled_path'), encoding='utf-8', header=0)
+    label.columns = ['ID', 'datetime', 'poster', 'content', 'image', 'video', 'sentiment']
+    li.append(label), li.append(train_unlabel_sample)
+    mix_lable_unlabel = pd.concat(li, axis=0, ignore_index=True)
+    # 适配Dataset label 判断里index_col='微博id'
+    mix_lable_unlabel.columns = ['微博id', 'datetime', 'poster', 'content', 'image', 'video', 'sentiment']
+    mix_lable_unlabel.to_csv(utils.cfg.get('PROCESSED_DATA', 'mix_label_unlabel_path'), index=False)
+
+
+if __name__ == '__main__':
 #     # testset = LabeledDataset()
 #     # print(testset.cleaned_data)
+
+sample_add_sentiment()
