@@ -195,13 +195,15 @@ class BertForSeqClassification(torch.nn.Module):
 
 
 def train():
+    '''
+    默认fine-tune后，紧接着预测。可注释，从本地加载再预测
+    '''
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    tf_flag = str(utils.cfg.get('HYPER_PARAMETER', 'from_tf'))
     seed()
 
     ld = LabeledDataset(preprocessed_data=dp.LabeledDataset(), tokenizer=None)
     # 如果要拼接隐藏层和pool out，此处实例化需要相应传参数
-    #model = BertForSeqClassification(hidden_layers=2, pool_out=True, labels=3).to(device)
+    # model = BertForSeqClassification(hidden_layers=2, pool_out=True, labels=3).to(device)
     model = BertForSeqClassification(labels=3).to(device)
     loss_values = []
 
@@ -282,6 +284,7 @@ def train():
         # endregion
 
     print("Training complete!")
+
     # region Save Model
     output_dir = '../Output/Robert_wwm_ext/'
     if not os.path.exists(output_dir): os.makedirs(output_dir)
@@ -295,39 +298,26 @@ def train():
     print("Saving model to %s" % output_dir)
     # endregion
 
-    # region Test
-    model.eval()
-
-    test_set = dp.TestDataset()
-    ul = Dataset(test_set)
-    predict_dataloader = ul.get_dataloader()
-
-    predictions = []
-    for batch in tqdm.tqdm(predict_dataloader):
-        batch = tuple(t.to(device) for t in batch)
-
-        b_input_ids, b_input_mask = batch
-        with torch.no_grad(): outputs = model(b_input_ids, attention_mask=b_input_mask)
-
-        logits = outputs[0]
-        logits = logits.detach().cpu().numpy()
-        predictions.append(logits)
-
-    predict_labels = []
-    for i in range(len(predictions)): predict_labels.append(np.argmax(predictions[i], axis=1).flatten().tolist())
-    test_set.fill_result(list(itertools.chain(*predict_labels)))  # 把多个list合并成一个list
-    test_set.submit()
-    print('    DONE.')
-    # endregion
+    # Test
+    test(model)
 
 
-def test():
+def test(model=None):
     print('Predicting labels in test sentences...')
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    if model is None:
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+        model = BertForSeqClassification()
+        model.load_state_dict(
+            torch.load((utils.cfg.get('PRETRAIN_MODEL', 'fine_tuned_roberta_wwm_ext_path') + '/pytorch_model.bin')))
+        model.to(device)
+
+        for param_tensor in model.state_dict():
+            print(param_tensor, "\t", model.state_dict()[param_tensor].size())
 
     tokenizer = transformers.BertTokenizer.from_pretrained(
         utils.cfg.get('PRETRAIN_MODEL', 'fine_tuned_roberta_wwm_ext_path'))
-    model = BertForSeqClassification(labels=3).to(device)
     model.eval()
 
     test_set = dp.TestDataset()
@@ -371,6 +361,6 @@ def format_time(elapsed):
 
 
 if __name__ == '__main__':
-    train()
+    # train()
 
-    # test()
+    test()

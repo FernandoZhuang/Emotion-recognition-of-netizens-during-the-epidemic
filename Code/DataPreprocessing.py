@@ -278,7 +278,7 @@ class UnlabeledDataset(Dataset):
 
 class TestDataset(Dataset):
 
-    def __init__(self, path: str = utils.cfg.get('ORIGINAL_DATA', 'train_unlabeled_path')):
+    def __init__(self, path: str = utils.cfg.get('ORIGINAL_DATA', 'test_path')):
         Dataset.__init__(self, path, DatasetType.TEST)
 
     def submit(self, path: str = utils.cfg.get('PROCESSED_DATA', 'submit_csv_path')):
@@ -353,8 +353,8 @@ def sample_add_sentiment():
     # TODO 由于UnlabelDataset初始化得先读入900k等一系列操作，耗时大，暂时不放在UnlabelDataset，等待未来优化
     # TODO 随机采样，有一定概率在train_unlabel_sample.insert报错Length of values does not match length of index
     # 暂时解决方案：重试。等待完善删除所有重复
-
-    sentiment_polar = pd.read_csv(utils.cfg.get('PROCESSED_DATA', 'submit_csv_path'), encoding='utf-8')
+    assert os.path.exists(utils.cfg.get('PROCESSED_DATA', 'unlabel_pseudo_path')), 'unlabel_pseudo文件路径错误或不存在或命名错误！'
+    sentiment_polar = pd.read_csv(utils.cfg.get('PROCESSED_DATA', 'unlabel_pseudo_path'), encoding='utf-8')
     train_unlabel = pd.read_csv(utils.cfg.get('ORIGINAL_DATA', 'train_unlabeled_path'), encoding='utf-8')
     train_unlabel.columns = ['ID', 'datetime', 'poster', 'content', 'image', 'video']
 
@@ -383,9 +383,8 @@ def sample_add_sentiment():
     mix_lable_unlabel.columns = ['微博id', 'datetime', 'poster', 'content', 'image', 'video', 'sentiment']
     mix_lable_unlabel.to_csv(utils.cfg.get('PROCESSED_DATA', 'mix_label_unlabel_path'), index=False)
 
-
-if __name__ == '__main__':
+# if __name__ == '__main__':
 #     # testset = LabeledDataset()
 #     # print(testset.cleaned_data)
-
-sample_add_sentiment()
+#
+#     sample_add_sentiment()
