@@ -275,6 +275,31 @@ class UnlabeledDataset(Dataset):
     def __init__(self, path: str = r'./data/nCoV_900k_train.unlabled.csv'):
         Dataset.__init__(self, path, DatasetType.UNLABELED)
 
+    def sample_add_sentiment(self):
+        '''
+        数据的输入是用模型打好了伪标签的900k csv（testdataset.submit函数生成）和原始900k csv
+        目的是按一定比例抽样，获取900k csv中的一部分映射了标签的数据，送入模型和100k结合再训练
+        参考https://stackoverflow.com/questions/37047420/how-to-drop-rows-of-pandas-dataframe-with-same-value-based-on-condition-in-diffe
+        '''
+        sentiment_polar = pd.read_csv(utils.cfg.get('PROCESSED_DATA', 'submit_csv_path'), encoding='utf-8')
+        train_unlabel = pd.read_csv(utils.cfg.get('ORIGINAL_DATA', 'train_unlabeled_path'), encoding='utf-8')
+        train_unlabel.columns = ['ID', 'datetime', 'poster', 'content', 'image', 'video']
+
+        sentiment_sample = sentiment_polar.sample(frac=0.1)  # frac是抽样比例
+        sentiment_sample.sort_values('id', inplace=True)
+        train_unlabel_sample = train_unlabel.loc[train_unlabel['ID'].isin(sentiment_sample['id'].to_list())]
+        train_unlabel_sample.sort_values('ID', inplace=True)  # 两次sort是为映射标签做准备
+        # 保留ID第一次重复的行，其余重复行全部删除
+        train_unlabel_sample.drop_duplicates(subset=['ID'], keep='first', inplace=True)
+        # 注释部分是删除所有重复ID对应行，不保留
+        # duplicated_row=train_unlabel_sample.loc[train_unlabel_sample['ID'].duplicated(keep='first'),'ID']
+        # unlabel_isin=train_unlabel_sample['ID'].isin(duplicated_row.unique())
+        # unlabel_index=train_unlabel_sample.index[unlabel_isin]
+        # train_unlabel_sample.drop(unlabel_index, inplace=True)
+
+        train_unlabel_sample.insert(loc=6, column='sentiment', value=sentiment_sample['y'].to_list())
+        train_unlabel_sample.to_csv('unlabel_sample.csv', index=False)
+
 
 class TestDataset(Dataset):
 
@@ -306,37 +331,43 @@ class TestDataset(Dataset):
         # http://sofasofa.io/forum_main_post.php?postid=1003010
         self.insert(self.shape[1], 'sentiment', res)
 
+
+def sentiment_relevent_corpus():
+    '''
+    处理情感分析领域相关语料
+    :return:
+    '''
+    # https://zhuanlan.zhihu.com/p/80029681
+    # region weibo_senti_100k数据集
+    weibo_senti_100k = 1
+    if weibo_senti_100k == 1:
+        senti = pd.read_csv(
+            '/home/zhw/PycharmProjects/nCovSentimentAnalysis/Data/SentimentRelevantCorpus/unzip/chineseNIP_weibo_senti_100k.csv',
+            encoding='utf-8')
+        columns_titles = ['review', 'label']
+        senti = senti.reindex(columns=columns_titles)
+        # 比赛数据 label是str类型，而不是nt类型
+        senti['label'] = senti['label'].apply(lambda x: '-1' if x == 0 else '1')
+        senti.columns = ['content', 'sentiment']
+        # 插空列，保持和比赛数据格式一致
+        senti = senti.reindex(columns=['datetime', 'poster', 'content', 'image', 'video', 'sentiment'])
+        senti.to_csv('relevent_senti_100k.csv', index=False)
+    # endregion
+
+    # region simplifyweibo_4_moods
+    senti = pd.read_csv(
+        '/home/zhw/PycharmProjects/nCovSentimentAnalysis/Data/SentimentRelevantCorpus/unzip/simplifyweibo_4_moods.csv',
+        encoding='utf-8')
+
+    columns_titles = ['review', 'label']
+    senti = senti.reindex(columns=columns_titles)
+
+    senti['label'] = senti['label'].apply(lambda x: '-1' if x != 0 else '1')
+    senti.columns = ['content', 'sentiment']
+    senti = senti.reindex(columns=['datetime', 'poster', 'content', 'image', 'video', 'sentiment'])
+    senti.to_csv('simplify_weibo_360k.csv', index=False)
+    # endregion
+
 # if __name__ == '__main__':
 #     # testset = LabeledDataset()
 #     # print(testset.cleaned_data)
-#
-#     # https://zhuanlan.zhihu.com/p/80029681
-#     # region weibo_senti_100k数据集
-#     weibo_senti_100k = 1
-#     if weibo_senti_100k == 1:
-#         senti = pd.read_csv(
-#             '/home/zhw/PycharmProjects/nCovSentimentAnalysis/Data/SentimentRelevantCorpus/unzip/chineseNIP_weibo_senti_100k.csv',
-#             encoding='utf-8')
-#         columns_titles = ['review', 'label']
-#         senti = senti.reindex(columns=columns_titles)
-#         #比赛数据 label是str类型，而不是nt类型
-#         senti['label'] = senti['label'].apply(lambda x: '-1' if x == 0 else '1')
-#         senti.columns=['content','sentiment']
-#         #插空列，保持和比赛数据格式一致
-#         senti=senti.reindex(columns=['datetime', 'poster', 'content', 'image', 'video', 'sentiment'])
-#         senti.to_csv('relevent_senti_100k.csv', index=False)
-#     # endregion
-#
-#     # region simplifyweibo_4_moods
-#     senti = pd.read_csv(
-#         '/home/zhw/PycharmProjects/nCovSentimentAnalysis/Data/SentimentRelevantCorpus/unzip/simplifyweibo_4_moods.csv',
-#         encoding='utf-8')
-#
-#     columns_titles = ['review', 'label']
-#     senti = senti.reindex(columns=columns_titles)
-#
-#     senti['label'] = senti['label'].apply(lambda x: '-1' if x != 0 else '1')
-#     senti.columns = ['content', 'sentiment']
-#     senti = senti.reindex(columns=['datetime', 'poster', 'content', 'image', 'video', 'sentiment'])
-#     senti.to_csv('simplify_weibo_360k.csv', index=False)
-#     # endregion
