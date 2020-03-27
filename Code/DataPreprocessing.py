@@ -17,6 +17,7 @@ class DatasetType(IntEnum):
     LABELED: int = 0
     UNLABELED: int = 1
     TEST: int = 2
+    SENTIMENTRELEVENTCORPUS: int = 3
 
 
 class DataCleaningStep(metaclass=ABCMeta):
@@ -25,8 +26,9 @@ class DataCleaningStep(metaclass=ABCMeta):
         start_time = time.time()
         self.run(args[0])
         end_time = time.time()
-        # Unlabeled数据集不应该输出LabelCheck信息
-        if (len(args[0].columns) == 6): print(f'已执行数据清洗步骤：{self.__doc__.strip()}，用时：{round(end_time - start_time, 2)}s')
+        # Unlabeled数据集不应该执行且输出LabelCheck信息
+        if (len(args[0].columns) == 6 or args[1] != 'LabelCheck'):
+            print(f'已执行数据清洗步骤：{self.__doc__.strip()}，用时：{round(end_time - start_time, 2)}s')
 
     @abc.abstractmethod
     def run(self, dataset: pd.DataFrame, n_cores: int = 8):
@@ -148,8 +150,11 @@ class DataCleaningToolSet:
         def run(self, dataset: pd.DataFrame, n_cores=8):
             # 如果是test，则直接pass
             if len(dataset.columns) == 6:
+                # 非比赛数据，即自己搜集的数据label被解析成int，因此加入int类型判断
+                # TODO 查找为什么会被解析成int
                 cleaned_data = dataset[
-                    (dataset['sentiment'] == '0') | (dataset['sentiment'] == '1') | (dataset['sentiment'] == '-1')]
+                    (dataset['sentiment'] == '0') | (dataset['sentiment'] == '1') | (dataset['sentiment'] == '-1') | (
+                            dataset['sentiment'] == 0) | (dataset['sentiment'] == 1) | (dataset['sentiment'] == -1)]
                 cleaned_data.sentiment = cleaned_data.sentiment.astype(int)
                 # 分类训练时，n_class >=0 & n_class <= max_classes
                 # 因此把-1映射到0,0映射到1,1映射到2
@@ -173,25 +178,32 @@ class Dataset(pd.DataFrame):
         # 以下为读取数据部分
         pd.DataFrame.__init__(self)
         assert os.path.exists(path), '数据文件路径错误！'
-        if type_ == DatasetType.LABELED:
-            self._data = pd.read_csv(path, index_col=['微博id'])._data
+
+        if type_ == DatasetType.SENTIMENTRELEVENTCORPUS:
+            self._data = pd.read_csv(path)._data
             print('已读入标注数据集')
-            self.columns = ['datetime', 'poster', 'content', 'image', 'video', 'sentiment']
             self.index.name = 'ID'
-        elif type_ == DatasetType.UNLABELED:
-            dateparser = lambda x: pd.datetime.strptime(x, '%m月%d日 %H:%M')
-            self._data = pd.read6_csv(path, index_col=['微博id'], parse_dates=['微博发布时间'], date_parser=dateparser)._data
-            print('已读入未标注数据集')
-            self.columns = ['datetime', 'poster', 'content', 'image', 'video']
-            self.index.name = 'ID'
-            self.datetime += pd.Timedelta(120 * 365, unit='d')
         else:
-            dateparser = lambda x: pd.datetime.strptime(x, '%m月%d日 %H:%M')
-            self._data = pd.read_csv(path, index_col=['微博id'], parse_dates=['微博发布时间'], date_parser=dateparser)._data
-            print('已读入测试集')
-            self.columns = ['datetime', 'poster', 'content', 'image', 'video']
-            self.index.name = 'ID'
-            self.datetime += pd.Timedelta(120 * 365, unit='d')
+            if type_ == DatasetType.LABELED:
+                self._data = pd.read_csv(path, index_col=['微博id'])._data
+                print('已读入标注数据集')
+                self.columns = ['datetime', 'poster', 'content', 'image', 'video', 'sentiment']
+                self.index.name = 'ID'
+            elif type_ == DatasetType.UNLABELED:
+                dateparser = lambda x: pd.datetime.strptime(x, '%m月%d日 %H:%M')
+                self._data = pd.read_csv(path, index_col=['微博id'], parse_dates=['微博发布时间'],
+                                         date_parser=dateparser)._data
+                print('已读入未标注数据集')
+                self.columns = ['datetime', 'poster', 'content', 'image', 'video']
+                self.index.name = 'ID'
+                self.datetime += pd.Timedelta(120 * 365, unit='d')
+            else:
+                dateparser = lambda x: pd.datetime.strptime(x, '%m月%d日 %H:%M')
+                self._data = pd.read_csv(path, index_col=['微博id'], parse_dates=['微博发布时间'], date_parser=dateparser)._data
+                print('已读入测试集')
+                self.columns = ['datetime', 'poster', 'content', 'image', 'video']
+                self.index.name = 'ID'
+                self.datetime += pd.Timedelta(120 * 365, unit='d')
 
         self._cleaned_data = None
         self._cat_hashtags = None
@@ -217,7 +229,7 @@ class Dataset(pd.DataFrame):
         else:
             self._cleaned_data = self.copy(deep=True)
             for tool in self.registered_tools:
-                self.tool_set[tool](self._cleaned_data)
+                self.tool_set[tool](self._cleaned_data, tool)
             return self._cleaned_data
 
     def _find_hashtags(self, x):
@@ -260,7 +272,7 @@ class LabeledDataset(Dataset):
 
 class UnlabeledDataset(Dataset):
 
-    def __init__(self, path: str = r'./data/nCoV_900k_train.unlabled.csv'):
+    def __init__(self, path: str = utils.cfg.get('ORIGINAL_DATA', 'train_unlabeled_path')):
         Dataset.__init__(self, path, DatasetType.UNLABELED)
 
 
@@ -295,6 +307,84 @@ class TestDataset(Dataset):
         self.insert(self.shape[1], 'sentiment', res)
 
 
-if __name__ == '__main__':
-    testset = LabeledDataset()
-    print(testset.cleaned_data)
+def sentiment_relevent_corpus():
+    '''
+    处理情感分析领域相关语料
+    :return:
+    '''
+    # https://zhuanlan.zhihu.com/p/80029681
+    # region weibo_senti_100k数据集
+    weibo_senti_100k = 1
+    if weibo_senti_100k == 1:
+        senti = pd.read_csv(
+            '/home/zhw/PycharmProjects/nCovSentimentAnalysis/Data/SentimentRelevantCorpus/unzip/chineseNIP_weibo_senti_100k.csv',
+            encoding='utf-8')
+        columns_titles = ['review', 'label']
+        senti = senti.reindex(columns=columns_titles)
+        # 比赛数据 label是str类型，而不是nt类型
+        senti['label'] = senti['label'].apply(lambda x: '-1' if x == 0 else '1')
+        senti.columns = ['content', 'sentiment']
+        # 插空列，保持和比赛数据格式一致
+        senti = senti.reindex(columns=['datetime', 'poster', 'content', 'image', 'video', 'sentiment'])
+        senti.to_csv('relevent_senti_100k.csv', index=False)
+    # endregion
+
+    # region simplifyweibo_4_moods
+    senti = pd.read_csv(
+        '/home/zhw/PycharmProjects/nCovSentimentAnalysis/Data/SentimentRelevantCorpus/unzip/simplifyweibo_4_moods.csv',
+        encoding='utf-8')
+
+    columns_titles = ['review', 'label']
+    senti = senti.reindex(columns=columns_titles)
+
+    senti['label'] = senti['label'].apply(lambda x: '-1' if x != 0 else '1')
+    senti.columns = ['content', 'sentiment']
+    senti = senti.reindex(columns=['datetime', 'poster', 'content', 'image', 'video', 'sentiment'])
+    senti.to_csv('simplify_weibo_360k.csv', index=False)
+    # endregion
+
+
+def sample_add_sentiment():
+    '''
+    数据的输入是用模型打好了伪标签的900k csv（testdataset.submit函数生成）和原始900k csv
+    目的是按一定比例抽样，获取900k csv中的一部分映射了标签的数据，送入模型和100k结合再训练
+    参考https://stackoverflow.com/questions/37047420/how-to-drop-rows-of-pandas-dataframe-with-same-value-based-on-condition-in-diffe
+    '''
+    # TODO 由于UnlabelDataset初始化得先读入900k等一系列操作，耗时大，暂时不放在UnlabelDataset，等待未来优化
+    # TODO 随机采样，有一定概率在train_unlabel_sample.insert报错Length of values does not match length of index
+    # 暂时解决方案：重试。等待完善删除所有重复
+    assert os.path.exists(utils.cfg.get('PROCESSED_DATA', 'unlabel_pseudo_path')), 'unlabel_pseudo文件路径错误或不存在或命名错误！'
+    sentiment_polar = pd.read_csv(utils.cfg.get('PROCESSED_DATA', 'unlabel_pseudo_path'), encoding='utf-8')
+    train_unlabel = pd.read_csv(utils.cfg.get('ORIGINAL_DATA', 'train_unlabeled_path'), encoding='utf-8')
+    train_unlabel.columns = ['ID', 'datetime', 'poster', 'content', 'image', 'video']
+
+    sentiment_sample = sentiment_polar.sample(frac=0.1)  # frac是抽样比例
+    sentiment_sample.sort_values('id', inplace=True)
+    train_unlabel_sample = train_unlabel.loc[train_unlabel['ID'].isin(sentiment_sample['id'].to_list())]
+    train_unlabel_sample.sort_values('ID', inplace=True)  # 两次sort是为映射标签做准备
+    # 保留ID第一次重复的行，其余重复行全部删除
+    train_unlabel_sample.drop_duplicates(subset=['ID'], keep='first', inplace=True)
+    # 注释部分是删除所有重复ID对应行，不保留
+    # duplicated_row=train_unlabel_sample.loc[train_unlabel_sample['ID'].duplicated(keep='first'),'ID']
+    # unlabel_isin=train_unlabel_sample['ID'].isin(duplicated_row.unique())
+    # unlabel_index=train_unlabel_sample.index[unlabel_isin]
+    # train_unlabel_sample.drop(unlabel_index, inplace=True)
+
+    train_unlabel_sample.insert(loc=6, column='sentiment', value=sentiment_sample['y'].to_list())
+    train_unlabel_sample.to_csv(utils.cfg.get('PROCESSED_DATA', 'unlabel_sample_path'), index=False)
+
+    # 合并文件
+    li = []
+    label = pd.read_csv(utils.cfg.get('ORIGINAL_DATA', 'train_labeled_path'), encoding='utf-8', header=0)
+    label.columns = ['ID', 'datetime', 'poster', 'content', 'image', 'video', 'sentiment']
+    li.append(label), li.append(train_unlabel_sample)
+    mix_lable_unlabel = pd.concat(li, axis=0, ignore_index=True)
+    # 适配Dataset label 判断里index_col='微博id'
+    mix_lable_unlabel.columns = ['微博id', 'datetime', 'poster', 'content', 'image', 'video', 'sentiment']
+    mix_lable_unlabel.to_csv(utils.cfg.get('PROCESSED_DATA', 'mix_label_unlabel_path'), index=False)
+
+# if __name__ == '__main__':
+#     # testset = LabeledDataset()
+#     # print(testset.cleaned_data)
+#
+#     sample_add_sentiment()
