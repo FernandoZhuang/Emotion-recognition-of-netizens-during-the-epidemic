@@ -51,7 +51,10 @@
 
 1. [Hashtag研究综述](http://manu44.magtech.com.cn/Jwk_infotech_wk3/article/2015/1003-3513/1003-3513-31-10-40.html#close)
 2. [Utilizing Hashtags for Sentiment Analysis of Tweets in T hePolitical Domain ](https://sci-hub.tw/10.1145/3055635.3056631)
-3. 
+
+### Text Classification
+
+1. [文本分类综述](https://zhuanlan.zhihu.com/p/76003775)
 
 ### Misc
 
@@ -73,6 +76,7 @@
     - 情感倾向 -> sentiment
 2. 新增生成测试数据集的排行榜提交文件函数submit，实现了ID号后需加空格的坑人逻辑
 3. 测试集TestDataset新增fill_result函数，可以用来填充模型训练的结果
+4. 实现900K抽样并添加伪标签
 
 ### 数据清洗
 
