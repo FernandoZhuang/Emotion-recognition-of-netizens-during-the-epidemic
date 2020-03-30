@@ -1,66 +1,168 @@
 import pandas as pd
+import numpy as np
 import re
+import multiprocessing
+import functools
+import time
+import collections
 
 import my_setting.utils as utils
+import DataPreprocessing as dp
 import Emoj
 
 
 class Hashtag():
-    def __init__(self):
-        print()
+    def __init__(self, train_label=True, train_unlabel=False, test=False):
+        if train_label:
+            self.train_label = pd.read_csv(utils.cfg.get('ORIGINAL_DATA', 'train_labeled_path'), encoding='utf-8')
+        if train_unlabel:
+            self.train_unlabel = pd.read_csv(utils.cfg.get('ORIGINAL_DATA', 'train_unlabeled_path'), encoding='utf-8')
+        if test:
+            self.test = pd.read_csv(utils.cfg.get('ORIGINAL_DATA', 'test_path'), encoding='utf-8')
+        # TODO 计划根据传递的动态化初始参数,例如train_label,train_unlabel,test都为True，支持同时返回对应hashtag，则content因为list
+        self.content = self.train_label['微博中文内容'].to_list()
+        self.label = self.train_label['情感倾向'].to_list()
 
-    def _get_hashtag(self):
+        self.exp = r'#(.+?)#'
+
+    def get_hashtag_concat_weibo_content(self, flag=0):
         '''
-        获取Hashtag
+        #TODO 把数据类型转换成dataframe,尝试加快速度，优化代码结构
+        flag:应用场景 一条微博里里有多种hashtag（多个但相同hashtag，不重复映射）
+        0 只保存第一次匹配到的hahstag
+        1 重复多行，即把多种hashtag映射到同一句话，行的起始只有hashtag不同，微博内容相同
         :return:
+        返回参数用于KNN输入
+        格式 [hashtag weibo_content]
         '''
-        train_label = pd.read_csv(utils.cfg.get('ORIGINAL_DATA', 'train_labeled_path'), encoding='utf-8')
-        train_unlabel = pd.read_csv(utils.cfg.get('ORIGINAL_DATA', 'train_unlabeled_path'), encoding='utf-8')
-        test = pd.read_csv(utils.cfg.get('ORIGINAL_DATA', 'test_path'), encoding='utf-8')
+        res = []
 
-        exp = r'#(.+?)#'
-        content = train_label['微博中文内容'].to_list()
+        for row in self.content:
+            hashtag = set([tmp for tmp in re.findall(self.exp, str(row))])
+            if hashtag:
+                for item in hashtag:
+                    tmp = item + '\t' + row
+                    res.append(tmp)
+                    if flag == 0: break
 
-        return self._regex(exp, content)
+        return res
 
-    def _regex(self, exp: str, x: list):
+    def get_content_without_hashtag(self):
+        '''
+        :return:
+        获取微博，该类微博里没有hashtag
+        '''
+        res = []
+
+        for row in self.content:
+            hashtag = re.match(self.exp, str(row))
+            if hashtag is None: res.append(row)
+
+        return res
+
+    def get_hashtag(self, x: list):
         '''
         :return:
         1. train_label 有16504种不同标签
         '''
-        return set([tmp for row in x for tmp in re.findall(exp, str(row))])
+        return set([tmp for row in x for tmp in re.findall(self.exp, str(row))])
 
-    def _distribution(self):
+    def distribution(self):
         '''
         计算hashtag在某时间点，某日的情感极性概率分布
         作为bayes的先验知识
         :return:
         '''
+        # train100K 平均每种hashtag有3.4条微博, train900K平均每种有8条，test则为1.7222条
+        thresh = [4, 8, 2]
 
-    def bayes(self):
+        return self._whole_distribution(thresh, False)
+
+    def sentiment_distribution_of_one_hashtag(self, hashtags: list):
         '''
-        利用先验知识，修正test情感极性输出
+        计算一种hashtag对应的各个极性分布，和并行结合
+        :return:
+        '''
+        res = collections.defaultdict(list)
+
+        for tag in hashtags:
+            exp = '#' + tag + '#'
+            sentiment_li = [0, 0, 0]
+            for row in self.train_label.iterrows():
+                if re.match(exp, str(row[1][3])) is not None:
+                    if row[1][6] == '-1':
+                        sentiment_li[0] += 1
+                    elif row[1][6] == '0':
+                        sentiment_li[1] += 1
+                    else:
+                        sentiment_li[2] += 1
+
+            res[tag] = np.sum([res[tag], sentiment_li], axis=0).tolist() if res[tag] else sentiment_li
+
+        # region 把字典保存为csv
+        # learn from https://stackoverflow.com/questions/8685809/writing-a-dictionary-to-a-csv-file-with-one-line-for-every-key-value
+        # learn from https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.from_dict.html
+        pd.DataFrame.from_dict(data=res, orient='index').to_csv('dict_file.csv', header=False)
+        # endregion
+
+        return res
+
+    def _whole_distribution(self, thresh: list, thresh_flag=False):
+        '''
+        计算各个Hashtag极性在总时间内的概率分布
+        :return:
+        '''
+        start_time = time.time()
+
+        if thresh_flag is False:
+            n_cores = 10
+            with multiprocessing.Pool(n_cores) as p:
+                res = p.map(self.sentiment_distribution_of_one_hashtag,
+                            dp.Batch(n_cores, list(self.get_hashtag(self.content))))
+                res = functools.reduce(lambda x, y: x + y, res)
+
+            print(f'获取各Hashtag极性在总时间内的概率分布, 用时:{round(time.time() - start_time, 2)}s')
+
+    def _day_by_day_distribution(self, thresh: list, thresh_flag=False):
+        '''
+        计算各个Hashtag极性分别在每天的概率分布
         :return:
         '''
 
+    def bayes(self, logits: list):
+        '''
+        利用先验知识，修正情感极性输出
+        :return:
+        '''
+        # TODO 等待完成纠正train部分，做好兼容
+        # TODO 一句话里有多个hashtag兼容
+        cnt = 0
+        res = []
+        test_content = self.train_unlabel['微博中文内容'].to_list()
+        hash_tag = self.get_hashtag(test_content)
+        distribution = self.distribution()
 
-class Cluster():
+        for logit in logits:
+            tmp = re.findall(self.exp, str(test_content[cnt]))
+            if len(res) == 1 and tmp in hash_tag:
+                res += [[distribution[tmp][i] * logit[i] for i in range(3)]]
+            cnt += 1
+
+        return res
+
+
+class TextCluster():
     def __init__(self):
         '''
         把无hashtag微博聚类到已有的hashtag
         结合emoj
         '''
 
-    def _KNN(self):
-        '''
-        选取KNN聚类
-        :return:
-        '''
-
 
 if __name__ == '__main__':
     worker = Hashtag()
 
-    res = worker._get_hashtag()
+    res = worker.get_content_without_hashtag()
+    worker.distribution()
 
     print()

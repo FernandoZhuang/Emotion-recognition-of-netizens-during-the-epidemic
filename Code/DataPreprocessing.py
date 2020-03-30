@@ -97,11 +97,34 @@ class DataCleaningToolSet:
     """
 
     def __init__(self):
-        self._tools = [tool for tool in dir(self) if
-                       not tool.startswith('__') and not tool.endswith('__') and tool[0].isupper()]
+        # self._tools = [tool for tool in dir(self) if
+        #                not tool.startswith('__') and not tool.endswith('__') and tool[0].isupper()]
+        # 显式排序，配合Dataset中tool_whether_do的值
+        self._tools = ['LabelCheck', 'DropExtraContentInTheEnd', 'DropHashtagAndAtReply',
+                       'TraditionalChineseToSimplifiedChinese']
 
     def __getitem__(self, item):
         return getattr(self, item)
+
+    class LabelCheck(DataCleaningStep):
+        '''
+        Label有各种噪音，暂时舍弃
+        '''
+
+        # TODO 等待讨论噪音标签的处理方法
+        def run(self, dataset: pd.DataFrame, n_cores=8):
+            # 如果是test，则直接pass
+            if len(dataset.columns) == 6:
+                # 非比赛数据，即自己搜集的数据label被解析成int，因此加入int类型判断
+                # TODO 查找为什么会被解析成int
+                cleaned_data = dataset[
+                    (dataset['sentiment'] == '0') | (dataset['sentiment'] == '1') | (dataset['sentiment'] == '-1') | (
+                            dataset['sentiment'] == 0) | (dataset['sentiment'] == 1) | (dataset['sentiment'] == -1)]
+                cleaned_data.sentiment = cleaned_data.sentiment.astype(int)
+                # 分类训练时，n_class >=0 & n_class <= max_classes
+                # 因此把-1映射到0,0映射到1,1映射到2
+                cleaned_data.sentiment = cleaned_data.sentiment + 1
+                dataset._data = cleaned_data._data
 
     class DropExtraContentInTheEnd(DataCleaningStep):
         """
@@ -141,26 +164,6 @@ class DataCleaningToolSet:
                 dataset.drop('content', inplace=True, axis=1)
                 dataset.insert(2, 'content', res)
 
-    class LabelCheck(DataCleaningStep):
-        '''
-        Label有各种噪音，暂时舍弃
-        '''
-
-        # TODO 等待讨论噪音标签的处理方法
-        def run(self, dataset: pd.DataFrame, n_cores=8):
-            # 如果是test，则直接pass
-            if len(dataset.columns) == 6:
-                # 非比赛数据，即自己搜集的数据label被解析成int，因此加入int类型判断
-                # TODO 查找为什么会被解析成int
-                cleaned_data = dataset[
-                    (dataset['sentiment'] == '0') | (dataset['sentiment'] == '1') | (dataset['sentiment'] == '-1') | (
-                            dataset['sentiment'] == 0) | (dataset['sentiment'] == 1) | (dataset['sentiment'] == -1)]
-                cleaned_data.sentiment = cleaned_data.sentiment.astype(int)
-                # 分类训练时，n_class >=0 & n_class <= max_classes
-                # 因此把-1映射到0,0映射到1,1映射到2
-                cleaned_data.sentiment = cleaned_data.sentiment + 1
-                dataset._data = cleaned_data._data
-
     @property
     def tools(self):
         return self._tools
@@ -168,7 +171,7 @@ class DataCleaningToolSet:
 
 class Dataset(pd.DataFrame):
 
-    def __init__(self, path: str, type_: int):
+    def __init__(self, path: str, type_: int, tool_whether_do=4):
         """
         数据文件类初始化函数，直接继承自DataFrame
         :param path: 数据文件路径
@@ -209,14 +212,19 @@ class Dataset(pd.DataFrame):
         self._cat_hashtags = None
 
         # 以下为注册要执行的数据清理工具部分
+
         self.tool_set = DataCleaningToolSet()
         self.registered_tools = []
-        self.register_data_clean_tools(self.tool_set.tools)
+        self.register_data_clean_tools(self.tool_set.tools, tool_whether_do)
 
-    def register_data_clean_tools(self, tools: list):
+    def register_data_clean_tools(self, tools: list, flag: int):
+        cnt = 1
+
         for tool in tools:
             assert tool in self.tool_set.tools, f"清洗工具{tool}不存在"
+            if cnt > flag: break
             self.registered_tools.append(tool)
+            cnt += 1
 
     @property
     def cleaned_data(self):
@@ -266,8 +274,8 @@ class Dataset(pd.DataFrame):
 
 class LabeledDataset(Dataset):
 
-    def __init__(self, path: str = utils.cfg.get('ORIGINAL_DATA', 'train_labeled_path')):
-        Dataset.__init__(self, path, DatasetType.LABELED)
+    def __init__(self, path: str = utils.cfg.get('PROCESSED_DATA', 'mix_label_unlabel_path')):
+        Dataset.__init__(self, path, DatasetType.LABELED, 2)
 
 
 class UnlabeledDataset(Dataset):
@@ -279,7 +287,7 @@ class UnlabeledDataset(Dataset):
 class TestDataset(Dataset):
 
     def __init__(self, path: str = utils.cfg.get('ORIGINAL_DATA', 'test_path')):
-        Dataset.__init__(self, path, DatasetType.TEST)
+        Dataset.__init__(self, path, DatasetType.TEST, 2)
 
     def submit(self, path: str = utils.cfg.get('PROCESSED_DATA', 'submit_csv_path')):
         """
@@ -355,22 +363,11 @@ def sample_add_sentiment():
     # 暂时解决方案：重试。等待完善删除所有重复
     assert os.path.exists(utils.cfg.get('PROCESSED_DATA', 'unlabel_pseudo_path')), 'unlabel_pseudo文件路径错误或不存在或命名错误！'
     sentiment_polar = pd.read_csv(utils.cfg.get('PROCESSED_DATA', 'unlabel_pseudo_path'), encoding='utf-8')
-    train_unlabel = pd.read_csv(utils.cfg.get('ORIGINAL_DATA', 'train_unlabeled_path'), encoding='utf-8')
+    train_unlabel = pd.read_csv(utils.cfg.get('ORIGINAL_DATA', 'train_unlabel_path'), encoding='utf-8')
     train_unlabel.columns = ['ID', 'datetime', 'poster', 'content', 'image', 'video']
 
-    sentiment_sample = sentiment_polar.sample(frac=0.1)  # frac是抽样比例
-    sentiment_sample.sort_values('id', inplace=True)
-    train_unlabel_sample = train_unlabel.loc[train_unlabel['ID'].isin(sentiment_sample['id'].to_list())]
-    train_unlabel_sample.sort_values('ID', inplace=True)  # 两次sort是为映射标签做准备
-    # 保留ID第一次重复的行，其余重复行全部删除
-    train_unlabel_sample.drop_duplicates(subset=['ID'], keep='first', inplace=True)
-    # 注释部分是删除所有重复ID对应行，不保留
-    # duplicated_row=train_unlabel_sample.loc[train_unlabel_sample['ID'].duplicated(keep='first'),'ID']
-    # unlabel_isin=train_unlabel_sample['ID'].isin(duplicated_row.unique())
-    # unlabel_index=train_unlabel_sample.index[unlabel_isin]
-    # train_unlabel_sample.drop(unlabel_index, inplace=True)
-
-    train_unlabel_sample.insert(loc=6, column='sentiment', value=sentiment_sample['y'].to_list())
+    train_unlabel.insert(loc=6, column='sentiment', value=sentiment_polar['y'].to_list())
+    train_unlabel_sample = train_unlabel.sample(frac=0.1)  # frac是抽样比例
     train_unlabel_sample.to_csv(utils.cfg.get('PROCESSED_DATA', 'unlabel_sample_path'), index=False)
 
     # 合并文件

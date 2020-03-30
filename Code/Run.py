@@ -54,7 +54,7 @@ class Dataset():
         return [partial(sent) for sent in sentences]
 
     def token_encode_multiprocess(self, tokenizer, sentences):
-        n_cores = 8
+        n_cores = 10
         start_time = time.time()
 
         with multiprocessing.Pool(n_cores) as p:
@@ -218,7 +218,7 @@ def train():
         {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
     ]
     optimizer = transformers.AdamW(optimizer_grouped_parameters, lr=2e-5, eps=1e-8)
-    scheduler = transformers.get_linear_schedule_with_warmup_(optimizer, num_warmup_steps=int(
+    scheduler = transformers.get_linear_schedule_with_warmup(optimizer, num_warmup_steps=int(
         utils.cfg.get('HYPER_PARAMETER', 'warmup_steps')), num_training_steps=train_steps)
     # endregion
 
@@ -300,10 +300,9 @@ def train():
 
 def test(model=None):
     print('Predicting labels in test sentences...')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     if model is None:
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
         model = BertForSeqClassification()
         model.load_state_dict(
             torch.load((utils.cfg.get('PRETRAIN_MODEL', 'fine_tuned_bert_path') + '/pytorch_model.bin')))
@@ -357,6 +356,6 @@ def format_time(elapsed):
 
 
 if __name__ == '__main__':
-    # train()
+    train()
 
     test()
