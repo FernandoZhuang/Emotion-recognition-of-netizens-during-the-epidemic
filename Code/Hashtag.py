@@ -5,6 +5,7 @@ import multiprocessing
 import functools
 import time
 import collections
+import tqdm
 
 import my_setting.utils as utils
 import DataPreprocessing as dp
@@ -12,7 +13,7 @@ import Emoj
 
 
 class Hashtag():
-    def __init__(self, train_label=True, train_unlabel=False, test=False):
+    def __init__(self, train_label=True, train_unlabel=False, test=True):
         if train_label:
             self.train_label = pd.read_csv(utils.cfg.get('ORIGINAL_DATA', 'train_labeled_path'), encoding='utf-8')
         if train_unlabel:
@@ -83,27 +84,32 @@ class Hashtag():
         计算一种hashtag对应的各个极性分布，和并行结合
         :return:
         '''
-        res = collections.defaultdict(list)
+        # TODO 等待兼容train 900K. if is is not None需要着重更改，达到优化
+        # TODO 等待优化dataframe的插入
+        res = pd.DataFrame(columns=['hashtag', '-1', '0', '1'])
+        res.set_index(['hashtag'], inplace=True)
+        record = set()  # 判断hashtag是否已存在于dataFrame中，处理key error
 
-        for tag in hashtags:
-            exp = '#' + tag + '#'
-            sentiment_li = [0, 0, 0]
-            for row in self.train_label.iterrows():
-                if re.match(exp, str(row[1][3])) is not None:
+        for row in self.train_label.iterrows():
+            tmps = set([tag for tag in re.findall(self.exp, str(row[1][3]))])
+            for tmp in tmps:
+                if tmp in record:
                     if row[1][6] == '-1':
-                        sentiment_li[0] += 1
+                        res.loc[tmp][0] += 1
                     elif row[1][6] == '0':
-                        sentiment_li[1] += 1
+                        res.loc[tmp][1] += 1
                     else:
-                        sentiment_li[2] += 1
-
-            res[tag] = np.sum([res[tag], sentiment_li], axis=0).tolist() if res[tag] else sentiment_li
-
-        # region 把字典保存为csv
-        # learn from https://stackoverflow.com/questions/8685809/writing-a-dictionary-to-a-csv-file-with-one-line-for-every-key-value
-        # learn from https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.from_dict.html
-        pd.DataFrame.from_dict(data=res, orient='index').to_csv('dict_file.csv', header=False)
-        # endregion
+                        res.loc[tmp][2] += 1
+                else:
+                    li = [0, 0, 0]
+                    if row[1][6] == '-1':
+                        li[0] += 1
+                    elif row[1][6] == '0':
+                        li[1] += 1
+                    else:
+                        li[2] += 1
+                    res.loc[tmp] = li
+                    record.add(tmp)
 
         return res
 
@@ -116,12 +122,21 @@ class Hashtag():
 
         if thresh_flag is False:
             n_cores = 10
+            print('---获取hashtag极性在总时间内的概率分布---')
             with multiprocessing.Pool(n_cores) as p:
                 res = p.map(self.sentiment_distribution_of_one_hashtag,
                             dp.Batch(n_cores, list(self.get_hashtag(self.content))))
                 res = functools.reduce(lambda x, y: x + y, res)
 
-            print(f'获取各Hashtag极性在总时间内的概率分布, 用时:{round(time.time() - start_time, 2)}s')
+            for row in res.iterrows():
+                # HACK 放入多进程中，会有大量大于1的数，所以单独拿出来
+                sum = row[1][0] + row[1][1] + row[1][2]
+                row[1][0], row[1][1], row[1][2] = float(row[1][0]) / sum, float(row[1][1]) / sum, float(row[1][2]) / sum
+
+            res.to_csv('distribution_all_hashtag.csv', header=False)
+            print(f'---获取用时:{round(time.time() - start_time, 2)}s---')
+
+        return res
 
     def _day_by_day_distribution(self, thresh: list, thresh_flag=False):
         '''
@@ -131,22 +146,30 @@ class Hashtag():
 
     def bayes(self, logits: list):
         '''
+        logits: [narray,narray,...]
         利用先验知识，修正情感极性输出
-        :return:
+        :return: [narray, narray, ....]
         '''
         # TODO 等待完成纠正train部分，做好兼容
         # TODO 一句话里有多个hashtag兼容
         cnt = 0
         res = []
-        test_content = self.train_unlabel['微博中文内容'].to_list()
-        hash_tag = self.get_hashtag(test_content)
+        test_content = self.test['微博中文内容'].to_list()
+        # 使用train部分的hashtag,目前阶段只计算了train100K的hashtag极性分布
+        hash_tag = self.get_hashtag(self.content)
         distribution = self.distribution()
 
-        for logit in logits:
-            tmp = re.findall(self.exp, str(test_content[cnt]))
-            if len(res) == 1 and tmp in hash_tag:
-                res += [[distribution[tmp][i] * logit[i] for i in range(3)]]
-            cnt += 1
+        for batch_logit in logits:
+            li = []
+            for logit in batch_logit:
+                tmp = re.findall(self.exp, str(test_content[cnt]))
+                if len(tmp) == 1 and (tmp[0] in hash_tag):
+                    li += [[distribution.loc[tmp[0]][i] * logit[i] for i in range(3)]]
+                else:
+                    li += [logit]
+                cnt += 1
+
+            res += [np.asarray(li)]
 
         return res
 

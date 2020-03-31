@@ -20,6 +20,7 @@ import multiprocessing
 import functools
 import my_setting.utils as utils
 import DataPreprocessing as dp
+import Hashtag as ht
 import itertools
 
 
@@ -301,6 +302,7 @@ def train():
 def test(model=None):
     print('Predicting labels in test sentences...')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    hashtag = ht.Hashtag()
 
     if model is None:
         model = BertForSeqClassification()
@@ -330,6 +332,9 @@ def test(model=None):
         logits = logits.detach().cpu().numpy()
         predictions.append(logits)
 
+    # bayes
+    predictions = hashtag.bayes(predictions)
+
     predict_labels = []
     for i in range(len(predictions)): predict_labels.append(np.argmax(predictions[i], axis=1).flatten().tolist())
     test_set.fill_result(list(itertools.chain(*predict_labels)))  # 把多个list合并成一个list
@@ -356,6 +361,6 @@ def format_time(elapsed):
 
 
 if __name__ == '__main__':
-    train()
+    # train()
 
     test()
