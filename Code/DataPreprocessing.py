@@ -132,6 +132,7 @@ class DataCleaningToolSet:
             if len(dataset.columns) == 6:
                 # 非比赛数据，即自己搜集的数据label被解析成int，因此加入int类型判断
                 # TODO 查找为什么会被解析成int
+                print('---开始清洗Label noise---')
                 with Pool(n_cores) as p:
                     res = p.map(self._unqualified_label, Batch(n_cores, list(dataset.iterrows())))
                     res = reduce(lambda x, y: x + y, res)
@@ -192,6 +193,9 @@ class Dataset(pd.DataFrame):
         数据文件类初始化函数，直接继承自DataFrame
         :param path: 数据文件路径
         :param type_: 数据文件类型
+        :param tool_whether_do: 数据清洗执行到哪步
+        依次是'LabelCheck', 'DropExtraContentInTheEnd', 'DropHashtagAndAtReply',
+        'TraditionalChineseToSimplifiedChinese'
         """
 
         # 以下为读取数据部分
@@ -203,24 +207,18 @@ class Dataset(pd.DataFrame):
             print('已读入标注数据集')
             self.index.name = 'ID'
         else:
+            dateparser = lambda x: pd.datetime.strptime(x, '%m月%d日 %H:%M')
             if type_ == DatasetType.LABELED:
-                self._data = pd.read_csv(path, usecols=[1, 2, 3, 4, 5, 6])._data
+                self._data = pd.read_csv(path, usecols=[1, 2, 3, 4, 5, 6], parse_dates=['微博发布时间'],
+                                         date_parser=dateparser)._data
                 print('已读入标注数据集')
                 self.columns = ['datetime', 'poster', 'content', 'image', 'video', 'sentiment']
                 self.index.name = 'ID'
-            elif type_ == DatasetType.UNLABELED:
-                dateparser = lambda x: pd.datetime.strptime(x, '%m月%d日 %H:%M')
-                self._data = pd.read_csv(path, usecols=[1, 2, 3, 4, 5], parse_dates=['微博发布时间'],
-                                         date_parser=dateparser)._data
-                print('已读入未标注数据集')
-                self.columns = ['datetime', 'poster', 'content', 'image', 'video']
-                self.index.name = 'ID'
-                self.datetime += pd.Timedelta(120 * 365, unit='d')
             else:
-                dateparser = lambda x: pd.datetime.strptime(x, '%m月%d日 %H:%M')
+                # 若要区分train unlabel test，则可基于本else代码段重新改写
                 self._data = pd.read_csv(path, usecols=[1, 2, 3, 4, 5], parse_dates=['微博发布时间'],
                                          date_parser=dateparser)._data
-                print('已读入测试集')
+                print('已读入无标注数据集')
                 self.columns = ['datetime', 'poster', 'content', 'image', 'video']
                 self.index.name = 'ID'
                 self.datetime += pd.Timedelta(120 * 365, unit='d')
@@ -229,7 +227,6 @@ class Dataset(pd.DataFrame):
         self._cat_hashtags = None
 
         # 以下为注册要执行的数据清理工具部分
-
         self.tool_set = DataCleaningToolSet()
         self.registered_tools = []
         self.register_data_clean_tools(self.tool_set.tools, tool_whether_do)
@@ -291,20 +288,20 @@ class Dataset(pd.DataFrame):
 
 class LabeledDataset(Dataset):
 
-    def __init__(self, path: str = utils.cfg.get('ORIGINAL_DATA', 'train_labeled_path')):
-        Dataset.__init__(self, path, DatasetType.LABELED, 1)
+    def __init__(self, flag: int = 1, path: str = utils.cfg.get('ORIGINAL_DATA', 'train_labeled_path')):
+        Dataset.__init__(self, path, DatasetType.LABELED, flag)
 
 
 class UnlabeledDataset(Dataset):
 
-    def __init__(self, path: str = utils.cfg.get('ORIGINAL_DATA', 'train_unlabeled_path')):
-        Dataset.__init__(self, path, DatasetType.UNLABELED)
+    def __init__(self, flag: int = 1, path: str = utils.cfg.get('ORIGINAL_DATA', 'train_unlabeled_path')):
+        Dataset.__init__(self, path, DatasetType.UNLABELED, flag)
 
 
 class TestDataset(Dataset):
 
-    def __init__(self, path: str = utils.cfg.get('ORIGINAL_DATA', 'test_path')):
-        Dataset.__init__(self, path, DatasetType.TEST, 1)
+    def __init__(self, flag: int = 1, path: str = utils.cfg.get('ORIGINAL_DATA', 'test_path')):
+        Dataset.__init__(self, path, DatasetType.TEST, flag)
 
     def submit(self, path: str = utils.cfg.get('PROCESSED_DATA', 'submit_csv_path')):
         """

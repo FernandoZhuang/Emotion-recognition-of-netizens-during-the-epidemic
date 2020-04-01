@@ -14,15 +14,12 @@ import Emoj
 
 class Hashtag():
     def __init__(self, train_label=True, train_unlabel=False, test=True):
-        if train_label:
-            self.train_label = pd.read_csv(utils.cfg.get('ORIGINAL_DATA', 'train_labeled_path'), encoding='utf-8')
-        if train_unlabel:
-            self.train_unlabel = pd.read_csv(utils.cfg.get('ORIGINAL_DATA', 'train_unlabeled_path'), encoding='utf-8')
-        if test:
-            self.test = pd.read_csv(utils.cfg.get('ORIGINAL_DATA', 'test_path'), encoding='utf-8')
+        if train_label: self.train_label = dp.LabeledDataset(2).cleaned_data
+        if train_unlabel: self.train_unlabel = dp.UnlabeledDataset(2).cleaned_data
+        if test: self.test = dp.TestDataset(2).cleaned_data
         # TODO 计划根据传递的动态化初始参数,例如train_label,train_unlabel,test都为True，支持同时返回对应hashtag，则content因为list
-        self.content = self.train_label['微博中文内容'].to_list()
-        self.label = self.train_label['情感倾向'].to_list()
+        self.content = self.train_label['content'].to_list()
+        self.label = self.train_label['sentiment'].to_list()
 
         self.exp = r'#(.+?)#'
 
@@ -79,7 +76,7 @@ class Hashtag():
 
         return self._whole_distribution(thresh, False)
 
-    def sentiment_distribution_of_one_hashtag(self, hashtags: list):
+    def sentiment_distribution_of_one_hashtag(self, x: list):
         '''
         计算一种hashtag对应的各个极性分布，和并行结合
         :return:
@@ -90,24 +87,14 @@ class Hashtag():
         res.set_index(['hashtag'], inplace=True)
         record = set()  # 判断hashtag是否已存在于dataFrame中，处理key error
 
-        for row in self.train_label.iterrows():
-            tmps = set([tag for tag in re.findall(self.exp, str(row[1][3]))])
+        for _, row in x:
+            tmps = set([tag for tag in re.findall(self.exp, str(row[2]))])
             for tmp in tmps:
                 if tmp in record:
-                    if row[1][6] == '-1':
-                        res.loc[tmp][0] += 1
-                    elif row[1][6] == '0':
-                        res.loc[tmp][1] += 1
-                    else:
-                        res.loc[tmp][2] += 1
+                    res.loc[tmp][int(row[5])] += 1
                 else:
                     li = [0, 0, 0]
-                    if row[1][6] == '-1':
-                        li[0] += 1
-                    elif row[1][6] == '0':
-                        li[1] += 1
-                    else:
-                        li[2] += 1
+                    li[int(row[5])] += 1
                     res.loc[tmp] = li
                     record.add(tmp)
 
@@ -125,7 +112,7 @@ class Hashtag():
             print('---获取hashtag极性在总时间内的概率分布---')
             with multiprocessing.Pool(n_cores) as p:
                 res = p.map(self.sentiment_distribution_of_one_hashtag,
-                            dp.Batch(n_cores, list(self.get_hashtag(self.content))))
+                            dp.Batch(n_cores, list(self.train_label.iterrows())))
                 res = functools.reduce(lambda x, y: x + y, res)
 
             for row in res.iterrows():
@@ -140,9 +127,10 @@ class Hashtag():
 
     def _day_by_day_distribution(self, thresh: list, thresh_flag=False):
         '''
-        计算各个Hashtag极性分别在每天的概率分布
+        计算各Hashtag极性分别在每天的概率分布
         :return:
         '''
+        start_time = time.time()
 
     def bayes(self, logits: list):
         '''
@@ -185,7 +173,7 @@ class TextCluster():
 if __name__ == '__main__':
     worker = Hashtag()
 
-    res = worker.get_content_without_hashtag()
+    # res = worker.get_content_without_hashtag()
     worker.distribution()
 
     print()
