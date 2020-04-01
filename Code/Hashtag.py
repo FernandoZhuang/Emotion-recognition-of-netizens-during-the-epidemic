@@ -139,7 +139,7 @@ class Hashtag():
         # TODO 一句话里有多个hashtag兼容
         cnt = 0
         res = []
-        test_content = self.test['微博中文内容'].to_list()
+        test_content = self.test['content'].to_list()
         # 使用train部分的hashtag,目前阶段只计算了train100K的hashtag极性分布
         hash_tag = self.get_hashtag(self.content)
         distribution = self.distribution()

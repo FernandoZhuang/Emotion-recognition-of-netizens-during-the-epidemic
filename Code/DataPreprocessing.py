@@ -27,7 +27,7 @@ class DataCleaningStep(metaclass=ABCMeta):
         self.run(args[0])
         end_time = time.time()
         # Unlabeled数据集不应该执行且输出LabelCheck信息
-        if (len(args[0].columns) == 6 or args[1] != 'LabelCheck'):
+        if (len(args[0].columns) == 7 or args[1] != 'LabelCheck'):
             print(f'已执行数据清洗步骤：{self.__doc__.strip()}，用时：{round(end_time - start_time, 2)}s')
 
     @abc.abstractmethod
@@ -65,12 +65,11 @@ class DataCleaningStep(metaclass=ABCMeta):
         :return: 不合格index, [index]
         '''
         res = []
-        for row in x:
-            if ((row[1][5] == '0') | (row[1][5] == '1') | (row[1][5] == '-1') | (row[1][5] == 0) | (
-                    row[1][5] == 1) | (row[1][5] == -1)):
+        for index, row in x:
+            if ((row[6] == '0') | (row[6] == '1') | (row[6] == '-1') | (row[6] == 0) | (row[6] == 1) | (row[6] == -1)):
                 continue
             else:
-                res.append(row[0])
+                res.append(index)
 
         return res
 
@@ -129,7 +128,7 @@ class DataCleaningToolSet:
         # TODO 等待讨论噪音标签的处理方法
         def run(self, dataset: pd.DataFrame, n_cores=10):
             # 如果是test，则直接pass
-            if len(dataset.columns) == 6:
+            if len(dataset.columns) == 7:
                 # 非比赛数据，即自己搜集的数据label被解析成int，因此加入int类型判断
                 # TODO 查找为什么会被解析成int
                 print('---开始清洗Label noise---')
@@ -138,6 +137,7 @@ class DataCleaningToolSet:
                     res = reduce(lambda x, y: x + y, res)
 
                 dataset.drop(res, inplace=True)
+                dataset.set_index(['id'], inplace=True)
                 dataset.sentiment = dataset.sentiment.astype(int)
                 # 分类训练时，n_class >=0 & n_class <= max_classes
                 # 因此把-1映射到0,0映射到1,1映射到2
@@ -209,14 +209,14 @@ class Dataset(pd.DataFrame):
         else:
             dateparser = lambda x: pd.datetime.strptime(x, '%m月%d日 %H:%M')
             if type_ == DatasetType.LABELED:
-                self._data = pd.read_csv(path, usecols=[1, 2, 3, 4, 5, 6], parse_dates=['微博发布时间'],
+                self._data = pd.read_csv(path, usecols=[0, 1, 2, 3, 4, 5, 6], parse_dates=['微博发布时间'],
                                          date_parser=dateparser)._data
                 print('已读入标注数据集')
-                self.columns = ['datetime', 'poster', 'content', 'image', 'video', 'sentiment']
-                self.index.name = 'ID'
+                self.columns = ['id', 'datetime', 'poster', 'content', 'image', 'video', 'sentiment']
+                # self.index.name = 'ID'
             else:
                 # 若要区分train unlabel test，则可基于本else代码段重新改写
-                self._data = pd.read_csv(path, usecols=[1, 2, 3, 4, 5], parse_dates=['微博发布时间'],
+                self._data = pd.read_csv(path, index_col=['微博id'], parse_dates=['微博发布时间'],
                                          date_parser=dateparser)._data
                 print('已读入无标注数据集')
                 self.columns = ['datetime', 'poster', 'content', 'image', 'video']

@@ -333,7 +333,7 @@ def test(model=None):
         predictions.append(logits)
 
     # bayes
-    predictions = hashtag.bayes(predictions)
+    # predictions = hashtag.bayes(predictions)
 
     predict_labels = []
     for i in range(len(predictions)): predict_labels.append(np.argmax(predictions[i], axis=1).flatten().tolist())
