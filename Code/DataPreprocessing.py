@@ -59,6 +59,21 @@ class DataCleaningStep(metaclass=ABCMeta):
     def _to_simplified(self, x):
         return [cc.to_simplified(proc) for proc in x]
 
+    def _unqualified_label(self, x):
+        '''
+        :param x:[index, series]
+        :return: 不合格index, [index]
+        '''
+        res = []
+        for row in x:
+            if ((row[1][5] == '0') | (row[1][5] == '1') | (row[1][5] == '-1') | (row[1][5] == 0) | (
+                    row[1][5] == 1) | (row[1][5] == -1)):
+                continue
+            else:
+                res.append(row[0])
+
+        return res
+
 
 class Batch:
     """
@@ -112,26 +127,27 @@ class DataCleaningToolSet:
         '''
 
         # TODO 等待讨论噪音标签的处理方法
-        def run(self, dataset: pd.DataFrame, n_cores=8):
+        def run(self, dataset: pd.DataFrame, n_cores=10):
             # 如果是test，则直接pass
             if len(dataset.columns) == 6:
                 # 非比赛数据，即自己搜集的数据label被解析成int，因此加入int类型判断
                 # TODO 查找为什么会被解析成int
-                cleaned_data = dataset[
-                    (dataset['sentiment'] == '0') | (dataset['sentiment'] == '1') | (dataset['sentiment'] == '-1') | (
-                            dataset['sentiment'] == 0) | (dataset['sentiment'] == 1) | (dataset['sentiment'] == -1)]
-                cleaned_data.sentiment = cleaned_data.sentiment.astype(int)
+                with Pool(n_cores) as p:
+                    res = p.map(self._unqualified_label, Batch(n_cores, list(dataset.iterrows())))
+                    res = reduce(lambda x, y: x + y, res)
+
+                dataset.drop(res, inplace=True)
+                dataset.sentiment = dataset.sentiment.astype(int)
                 # 分类训练时，n_class >=0 & n_class <= max_classes
                 # 因此把-1映射到0,0映射到1,1映射到2
-                cleaned_data.sentiment = cleaned_data.sentiment + 1
-                dataset._data = cleaned_data._data
+                dataset.sentiment = dataset.sentiment + 1
 
     class DropExtraContentInTheEnd(DataCleaningStep):
         """
         去除微博内容最后的"?"和"展开全文c"
         """
 
-        def run(self, dataset: pd.DataFrame, n_cores=6):
+        def run(self, dataset: pd.DataFrame, n_cores=10):
             with Pool(n_cores) as p:
                 exp = '\?展开全文c$|\?$|O网页链接'
                 res = p.map(partial(self._regexp_sub, exp), Batch(n_cores, dataset.content.to_list()))
@@ -183,18 +199,18 @@ class Dataset(pd.DataFrame):
         assert os.path.exists(path), '数据文件路径错误！'
 
         if type_ == DatasetType.SENTIMENTRELEVENTCORPUS:
-            self._data = pd.read_csv(path)._data
+            self._data = pd.read_csv(path, usecols=[1, 2, 3, 4, 5], )._data
             print('已读入标注数据集')
             self.index.name = 'ID'
         else:
             if type_ == DatasetType.LABELED:
-                self._data = pd.read_csv(path, index_col=['微博id'])._data
+                self._data = pd.read_csv(path, usecols=[1, 2, 3, 4, 5, 6])._data
                 print('已读入标注数据集')
                 self.columns = ['datetime', 'poster', 'content', 'image', 'video', 'sentiment']
                 self.index.name = 'ID'
             elif type_ == DatasetType.UNLABELED:
                 dateparser = lambda x: pd.datetime.strptime(x, '%m月%d日 %H:%M')
-                self._data = pd.read_csv(path, index_col=['微博id'], parse_dates=['微博发布时间'],
+                self._data = pd.read_csv(path, usecols=[1, 2, 3, 4, 5], parse_dates=['微博发布时间'],
                                          date_parser=dateparser)._data
                 print('已读入未标注数据集')
                 self.columns = ['datetime', 'poster', 'content', 'image', 'video']
@@ -202,7 +218,8 @@ class Dataset(pd.DataFrame):
                 self.datetime += pd.Timedelta(120 * 365, unit='d')
             else:
                 dateparser = lambda x: pd.datetime.strptime(x, '%m月%d日 %H:%M')
-                self._data = pd.read_csv(path, index_col=['微博id'], parse_dates=['微博发布时间'], date_parser=dateparser)._data
+                self._data = pd.read_csv(path, usecols=[1, 2, 3, 4, 5], parse_dates=['微博发布时间'],
+                                         date_parser=dateparser)._data
                 print('已读入测试集')
                 self.columns = ['datetime', 'poster', 'content', 'image', 'video']
                 self.index.name = 'ID'
@@ -274,8 +291,8 @@ class Dataset(pd.DataFrame):
 
 class LabeledDataset(Dataset):
 
-    def __init__(self, path: str = utils.cfg.get('PROCESSED_DATA', 'mix_label_unlabel_path')):
-        Dataset.__init__(self, path, DatasetType.LABELED, 2)
+    def __init__(self, path: str = utils.cfg.get('ORIGINAL_DATA', 'train_labeled_path')):
+        Dataset.__init__(self, path, DatasetType.LABELED, 1)
 
 
 class UnlabeledDataset(Dataset):
@@ -287,7 +304,7 @@ class UnlabeledDataset(Dataset):
 class TestDataset(Dataset):
 
     def __init__(self, path: str = utils.cfg.get('ORIGINAL_DATA', 'test_path')):
-        Dataset.__init__(self, path, DatasetType.TEST, 2)
+        Dataset.__init__(self, path, DatasetType.TEST, 1)
 
     def submit(self, path: str = utils.cfg.get('PROCESSED_DATA', 'submit_csv_path')):
         """

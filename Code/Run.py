@@ -52,7 +52,7 @@ class Dataset():
         '''
         若不要多进程，可基于本函数修改成单一进程tokenize，因此不使用匿名函数嵌套进token_encode_multiprocess
         '''
-        return [partial(sent) for sent in sentences]
+        return [partial(str(sent)) for sent in sentences]
 
     def token_encode_multiprocess(self, tokenizer, sentences):
         n_cores = 10
@@ -361,6 +361,6 @@ def format_time(elapsed):
 
 
 if __name__ == '__main__':
-    # train()
+    train()
 
     test()
