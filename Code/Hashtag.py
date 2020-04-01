@@ -108,12 +108,9 @@ class Hashtag():
         start_time = time.time()
 
         if thresh_flag is False:
-            n_cores = 10
             print('---获取hashtag极性在总时间内的概率分布---')
-            with multiprocessing.Pool(n_cores) as p:
-                res = p.map(self.sentiment_distribution_of_one_hashtag,
-                            dp.Batch(n_cores, list(self.train_label.iterrows())))
-                res = functools.reduce(lambda x, y: x + y, res)
+            # 使用多进程的话，返回的各匹dataframe会有重复键，则需要grouby().sum，于是时间差不多
+            res = self.sentiment_distribution_of_one_hashtag(list(self.train_label.iterrows()))
 
             for row in res.iterrows():
                 # HACK 放入多进程中，会有大量大于1的数，所以单独拿出来
@@ -121,7 +118,7 @@ class Hashtag():
                 row[1][0], row[1][1], row[1][2] = float(row[1][0]) / sum, float(row[1][1]) / sum, float(row[1][2]) / sum
 
             res.to_csv('distribution_all_hashtag.csv', header=False)
-            print(f'---获取用时:{round(time.time() - start_time, 2)}s---')
+            print(f'获取用时:{round(time.time() - start_time, 2)}s')
 
         return res
 
