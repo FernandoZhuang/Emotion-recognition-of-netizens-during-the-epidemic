@@ -37,10 +37,10 @@ class Dataset():
 
         if self.tokenizer is None:
             tokenizer = transformers.BertTokenizer.from_pretrained(
-                utils.cfg.get('PRETRAIN_MODEL', 'original_bert_path'))
+                utils.cfg.get('PRETRAIN_MODEL', 'original_roberta_wwm_ext_path'))
         else:
             tokenizer = transformers.BertTokenizer.from_pretrained(
-                utils.cfg.get('PRETRAIN_MODEL', 'fine_tuned_bert_path'))
+                utils.cfg.get('PRETRAIN_MODEL', 'original_roberta_wwm_ext_path'))
 
         # TODO input_ids attention_mask要不要做私有属性 在LabeledDataset使用get方法获取?
         self.input_ids = self.token_encode_multiprocess(tokenizer=tokenizer, sentences=sentences)
@@ -143,11 +143,11 @@ class BertForSeqClassification(torch.nn.Module):
         self.hidden_layers, self.pool_out, self.labels = hidden_layers, pool_out, labels
 
         self._config = transformers.BertConfig.from_pretrained(
-            utils.cfg.get('PRETRAIN_MODEL', 'original_bert_path'), num_labels=self.labels,
+            utils.cfg.get('PRETRAIN_MODEL', 'original_roberta_wwm_ext_path'), num_labels=self.labels,
             output_attentions=False,
             output_hidden_states=True)
         self.bert = transformers.BertForSequenceClassification.from_pretrained(
-            utils.cfg.get('PRETRAIN_MODEL', 'original_bert_path'), config=self._config)
+            utils.cfg.get('PRETRAIN_MODEL', 'original_roberta_wwm_ext_path'), config=self._config)
 
         self.dropout = torch.nn.Dropout(float(utils.cfg.get('HYPER_PARAMETER', 'hidden_dropout_prob')))
         self.loss = torch.nn.CrossEntropyLoss()
@@ -283,7 +283,7 @@ def train():
     print("Training complete!")
 
     # region Save Model
-    output_dir = '../Output/Bert_base_Chinese/'
+    output_dir = '../Output/Robert_wwm_ext/'
     if not os.path.exists(output_dir): os.makedirs(output_dir)
 
     model_to_save = model.module if hasattr(model, 'module') else model
@@ -307,14 +307,14 @@ def test(model=None):
     if model is None:
         model = BertForSeqClassification()
         model.load_state_dict(
-            torch.load((utils.cfg.get('PRETRAIN_MODEL', 'fine_tuned_bert_path') + '/pytorch_model.bin')))
+            torch.load((utils.cfg.get('PRETRAIN_MODEL', 'fine_tuned_roberta_wwm_ext_path') + '/pytorch_model.bin')))
         model.to(device)
 
         for param_tensor in model.state_dict():
             print(param_tensor, "\t", model.state_dict()[param_tensor].size())
 
     tokenizer = transformers.BertTokenizer.from_pretrained(
-        utils.cfg.get('PRETRAIN_MODEL', 'fine_tuned_bert_path'))
+        utils.cfg.get('PRETRAIN_MODEL', 'fine_tuned_roberta_wwm_ext_path'))
     model.eval()
 
     test_set = dp.TestDataset()

@@ -15,8 +15,7 @@ if __name__ == '__main__':
     pd.set_option('max_colwidth', 100)
     plt.style.use('seaborn')
 
-    train = pd.read_csv(
-        './knn-classification-master/knn-classification/data/cnews.train.knn_seg',
-        encoding='utf-8')
+    var_ = pd.read_csv('../Output/everyday_sentiment.csv', encoding='utf-8')
+    col1, col2, col3 = var_['-1'].sum(), var_['0'].sum(), var_['1'].sum()
 
     print()

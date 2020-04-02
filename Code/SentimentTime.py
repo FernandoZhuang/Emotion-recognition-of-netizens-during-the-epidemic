@@ -1,7 +1,6 @@
-import re
+import math
+import os
 import pandas as pd
-import multiprocessing
-import functools
 import time
 
 import my_setting.utils as utils
@@ -9,27 +8,10 @@ import DataPreprocessing as dp
 
 
 class SentimentTime():
-    def __init__(self, train_label=True, train_unlabel=False, test=False):
+    def __init__(self, train_label=False, train_unlabel=False, test=False):
         if train_label: self.train_label = dp.LabeledDataset(1).cleaned_data
         if train_unlabel: self.train_unlabel = dp.UnlabeledDataset(1).cleaned_data
         if test: self.test = dp.TestDataset(1).cleaned_data
-
-    def _calculate(self, x):
-        '''
-        :param x: list[iterrows]
-        :return:
-        '''
-        res = pd.DataFrame(columns=['dayfromzero', '-1', '0', '1'])
-        res.set_index(['dayfromzero'], inplace=True)
-
-        oneday, startday = [0, 0, 0], x[0][1][8]
-        for _, row in x:
-            if row[8] != startday:
-                res.loc[startday] = oneday
-                oneday, startday = [0, 0, 0], row[8]
-            oneday[int(row[5])] += 1
-
-        return res
 
     def everyday_sentiment(self):
         '''
@@ -42,25 +24,49 @@ class SentimentTime():
 
         start_time = time.time()
         print('---情感极性在每天概率分布开始计算---')
-        with multiprocessing.Pool(10) as p:
-            res = p.map(self._calculate, dp.Batch(10, list(self.train_label.iterrows())))
-            res = functools.reduce(lambda x, y: x + y, res)
+        res = pd.DataFrame(columns=['dayfromzero', '-1', '0', '1'])
+        res.set_index(['dayfromzero'], inplace=True)
 
-        print(f'情感极性在每天概率分布计算完毕，耗时{time.time() - start_time}s')
-        res.to_csv('everyday_sentiment.csv', header=False)
+        day_flag = set()
+        for _, row in self.train_label.iterrows():
+            if row[8] not in day_flag:
+                li = [0, 0, 0]
+                li[row[5]] += 1
+                res.loc[row[8]] = li
+                day_flag.add(row[8])
+            else:
+                res.loc[row[8]][row[5]] += 1
+
+        res.to_csv(utils.cfg.get('PROCESSED_DATA', 'everyday_sentiment_path'))
         return res
 
-    def window_time_sentiment(self):
+    def window_time_sentiment(self, window: int = 5):
         '''
         计算情感极性在一个window size 时间尺寸内的概率分布
         :return:
         '''
+        res = pd.DataFrame(columns=['window', '-1', '0', '1'])
+        res.set_index(['window'], inplace=True)
+        if os.path.exists(utils.cfg.get('PROCESSED_DATA', 'everyday_sentiment_path')):
+            eachday = pd.read_csv(utils.cfg.get('PROCESSED_DATA', 'everyday_sentiment_path'))
+        else:
+            eachday = self.everyday_sentiment()
 
-        print()
+        window_day, window_set = [0, 0, 0], set()
+        for _, row in eachday.iterrows():
+            var_ = math.floor(row[0] / window)
+            if var_ not in window_set:
+                res.loc[var_] = [row[1], row[2], row[3]]
+                window_set.add(var_)
+            else:
+                res.loc[var_] = [res.loc[var_][i] + row[i + 1] for i in range(3)]
+
+        res.to_csv(utils.cfg.get('PROCESSED_DATA', 'window_time_sentiment_path'))
+        return res
 
 
 if __name__ == '__main__':
     worker = SentimentTime()
-    worker.everyday_sentiment()
+    worker.window_time_sentiment()
 
     print()

@@ -288,7 +288,7 @@ class Dataset(pd.DataFrame):
 
 class LabeledDataset(Dataset):
 
-    def __init__(self, flag: int = 1, path: str = utils.cfg.get('ORIGINAL_DATA', 'train_labeled_path')):
+    def __init__(self, flag: int = 2, path: str = utils.cfg.get('ORIGINAL_DATA', 'train_labeled_path')):
         Dataset.__init__(self, path, DatasetType.LABELED, flag)
 
 
@@ -300,7 +300,7 @@ class UnlabeledDataset(Dataset):
 
 class TestDataset(Dataset):
 
-    def __init__(self, flag: int = 1, path: str = utils.cfg.get('ORIGINAL_DATA', 'test_path')):
+    def __init__(self, flag: int = 2, path: str = utils.cfg.get('ORIGINAL_DATA', 'test_path')):
         Dataset.__init__(self, path, DatasetType.TEST, flag)
 
     def submit(self, path: str = utils.cfg.get('PROCESSED_DATA', 'submit_csv_path')):
