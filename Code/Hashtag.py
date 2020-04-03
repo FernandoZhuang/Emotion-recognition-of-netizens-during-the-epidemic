@@ -1,11 +1,8 @@
 import pandas as pd
 import numpy as np
 import re
-import multiprocessing
-import functools
+import os
 import time
-import collections
-import tqdm
 
 import my_setting.utils as utils
 import DataPreprocessing as dp
@@ -13,7 +10,7 @@ import Emoj
 
 
 class Hashtag():
-    def __init__(self, train_label=True, train_unlabel=False, test=True):
+    def __init__(self, train_label=False, train_unlabel=False, test=False):
         if train_label: self.train_label = dp.LabeledDataset(2).cleaned_data
         if train_unlabel: self.train_unlabel = dp.UnlabeledDataset(2).cleaned_data
         if test: self.test = dp.TestDataset(2).cleaned_data
@@ -76,6 +73,28 @@ class Hashtag():
 
         return self._whole_distribution(thresh, False)
 
+    def _whole_distribution(self, thresh: list, thresh_flag=False):
+        '''
+        计算各个Hashtag极性在总时间内的概率分布
+        :return:
+        '''
+        start_time = time.time()
+
+        if thresh_flag is False:
+            print('---获取hashtag极性在总时间内的概率分布---')
+            # 使用多进程的话，返回的各匹dataframe会有重复键，则需要grouby().sum，于是时间差不多
+            res = self.sentiment_distribution_of_one_hashtag(list(self.train_label.iterrows()))
+
+            for row in res.iterrows():
+                # HACK 放入多进程中，会有大量大于1的数，所以单独拿出来
+                sum = row[1][0] + row[1][1] + row[1][2]
+                row[1][0], row[1][1], row[1][2] = float(row[1][0]) / sum, float(row[1][1]) / sum, float(row[1][2]) / sum
+
+            res.to_csv(utils.cfg.get('PROCESSED_DATA', 'distribution_all_hashtag_path'))
+            print(f'获取用时:{round(time.time() - start_time, 2)}s')
+
+        return res
+
     def sentiment_distribution_of_one_hashtag(self, x: list):
         '''
         计算一种hashtag对应的各个极性分布，和并行结合
@@ -100,28 +119,6 @@ class Hashtag():
 
         return res
 
-    def _whole_distribution(self, thresh: list, thresh_flag=False):
-        '''
-        计算各个Hashtag极性在总时间内的概率分布
-        :return:
-        '''
-        start_time = time.time()
-
-        if thresh_flag is False:
-            print('---获取hashtag极性在总时间内的概率分布---')
-            # 使用多进程的话，返回的各匹dataframe会有重复键，则需要grouby().sum，于是时间差不多
-            res = self.sentiment_distribution_of_one_hashtag(list(self.train_label.iterrows()))
-
-            for row in res.iterrows():
-                # HACK 放入多进程中，会有大量大于1的数，所以单独拿出来
-                sum = row[1][0] + row[1][1] + row[1][2]
-                row[1][0], row[1][1], row[1][2] = float(row[1][0]) / sum, float(row[1][1]) / sum, float(row[1][2]) / sum
-
-            res.to_csv('distribution_all_hashtag.csv', header=False)
-            print(f'获取用时:{round(time.time() - start_time, 2)}s')
-
-        return res
-
     def _day_by_day_distribution(self, thresh: list, thresh_flag=False):
         '''
         计算各Hashtag极性分别在每天的概率分布
@@ -140,10 +137,14 @@ class Hashtag():
         cnt = 0
         res = []
         test_content = self.test['content'].to_list()
-        # 使用train部分的hashtag,目前阶段只计算了train100K的hashtag极性分布
+        # TODO 使用train部分的hashtag,目前阶段只计算了train100K的hashtag极性分布
         hash_tag = self.get_hashtag(self.content)
-        distribution = self.distribution()
+        if os.path.exists(utils.cfg.get('PROCESSED_DATA', 'distribution_all_hashtag_path')):
+            distribution = pd.read_csv(utils.cfg.get('PROCESSED_DATA', 'distribution_all_hashtag_path'), header=None)
+        else:
+            distribution = self.distribution()
 
+        print('---开始按照Hashtag情感极性分布律纠正---')
         for batch_logit in logits:
             li = []
             for logit in batch_logit:

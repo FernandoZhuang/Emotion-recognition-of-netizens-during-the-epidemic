@@ -221,7 +221,7 @@ class Dataset(pd.DataFrame):
                 print('已读入无标注数据集')
                 self.columns = ['datetime', 'poster', 'content', 'image', 'video']
                 self.index.name = 'ID'
-                self.datetime += pd.Timedelta(120 * 365, unit='d')
+                # self.datetime += pd.Timedelta(120 * 365, unit='d')
 
         self._cleaned_data = None
         self._cat_hashtags = None

@@ -1,6 +1,7 @@
 import math
 import os
 import pandas as pd
+import numpy as np
 import time
 
 import my_setting.utils as utils
@@ -18,6 +19,9 @@ class SentimentTime():
         计算情感极性在每天的概率分布
         :return:
         '''
+        if os.path.exists(utils.cfg.get('PROCESSED_DATA', 'everyday_sentiment_path')):
+            return pd.read_csv(utils.cfg.get('PROCESSED_DATA', 'everyday_sentiment_path'))
+
         self.train_label['month'] = self.train_label['datetime'].dt.month
         self.train_label['day'] = self.train_label['datetime'].dt.day
         self.train_label['dayfromzero'] = (self.train_label['month'] - 1) * 31 + self.train_label['day']
@@ -37,7 +41,7 @@ class SentimentTime():
             else:
                 res.loc[row[8]][row[5]] += 1
 
-        res.to_csv(utils.cfg.get('PROCESSED_DATA', 'everyday_sentiment_path'))
+        # res.to_csv(utils.cfg.get('PROCESSED_DATA', 'everyday_sentiment_path'))
         return res
 
     def window_time_sentiment(self, window: int = 5):
@@ -47,10 +51,7 @@ class SentimentTime():
         '''
         res = pd.DataFrame(columns=['window', '-1', '0', '1'])
         res.set_index(['window'], inplace=True)
-        if os.path.exists(utils.cfg.get('PROCESSED_DATA', 'everyday_sentiment_path')):
-            eachday = pd.read_csv(utils.cfg.get('PROCESSED_DATA', 'everyday_sentiment_path'))
-        else:
-            eachday = self.everyday_sentiment()
+        eachday = self.everyday_sentiment()
 
         window_day, window_set = [0, 0, 0], set()
         for _, row in eachday.iterrows():
@@ -61,12 +62,40 @@ class SentimentTime():
             else:
                 res.loc[var_] = [res.loc[var_][i] + row[i + 1] for i in range(3)]
 
+        for index, row in res.iterrows():
+            sum = row[0] + row[1] + row[2]
+            res.loc[index] = [float(row[i] / sum) for i in range(3)]
+
         res.to_csv(utils.cfg.get('PROCESSED_DATA', 'window_time_sentiment_path'))
         return res
 
+    def bayes(self, logits: list, window: int = 1):
+        '''
+        依据情感极性随时间变化纠正神经网络输出
+        :param window代表使用多长时间范围纠正
+        :return:
+        '''
+        cnt, res = 0, []
+        self.test['month'] = self.test['datetime'].dt.month
+        self.test['day'] = self.test['datetime'].dt.day
+        self.test['dayfromzero'] = (self.test['month'] - 1) * 31 + self.test['day']
+        window_record = self.window_time_sentiment(window)
 
-if __name__ == '__main__':
-    worker = SentimentTime()
-    worker.window_time_sentiment()
+        print('---开始按照情感极性随时间纠正---')
+        for batch_logit in logits:
+            li = []
+            for logit in batch_logit:
+                index = math.floor(self.test.iat[cnt, 7] / window)
+                li += [[window_record.loc[index][i] * logit[i] for i in range(3)]]
+                cnt += 1
 
-    print()
+            res += [np.asarray(li)]
+
+        return res
+
+#
+# if __name__ == '__main__':
+#     worker = SentimentTime(test=True)
+#     worker.bayes(list())
+#
+#     print()
