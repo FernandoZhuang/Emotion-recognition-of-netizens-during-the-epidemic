@@ -25,6 +25,63 @@ import SentimentTime as st
 import itertools
 
 
+class TensorDataset(tud.Dataset):
+    r'''
+    根据每天的微博数，分别获取动态batch_size
+    '''
+
+    def __init__(self, *args, **kwargs):
+        assert all(args[0].size(0) == tensor.size(0) for tensor in args)
+        self.tensors = args
+        self.day = kwargs['preprocessed_data']['datetime'].dt.day
+        self.cluster_indices = [i for i in range(len(self.day))]
+
+        self.batch_size = []
+        cnt, former = 0, 1
+        for i in self.day:
+            if i != former:
+                self.batch_size.append(cnt)
+                former, cnt = i, 0
+            else:
+                cnt += 1
+
+    def __getitem__(self, index):
+        return tuple(tensor[index] for tensor in self.tensors)
+
+    def __len__(self):
+        return self.tensors[0].size(0)
+
+
+class SequentialSampler(tud.Sampler):
+    r'''
+    依据动态batch_size，调整每个batch内的序号数
+    '''
+
+    def __init__(self, data_source, batch_size=None, shuffle=True):
+        self.data_source = data_source
+        self.batch_sizes = self.data_source.batch_size
+        self.shuffle = shuffle
+
+    def flatten_list(self, lst):
+        return [item for sublist in lst for item in sublist]
+
+    def __iter__(self):
+        cluster_indices = self.data_source.cluster_indices
+        batches, cnt = [], 0
+
+        for len_ in self.batch_sizes:
+            batches += [cluster_indices[cnt:cnt + len_]]
+            cnt = cnt + len_
+
+        if self.shuffle: random.shuffle(batches)
+
+        return iter(batches)
+
+    def __len__(self):
+        return len(self.data_source)
+
+
+
 class Dataset():
     def __init__(self, preprocessed_data=None, tokenizer=None):
         super(Dataset, self).__init__()
@@ -32,7 +89,7 @@ class Dataset():
         self.preprocessed_data = preprocessed_data
         self.tokenizer = tokenizer
 
-    def get_dataloader(self):
+    def get_dataloader(self, is_super=True):
         cleaned_data = self.preprocessed_data.cleaned_data
         sentences = cleaned_data.content.values
 
@@ -47,7 +104,9 @@ class Dataset():
         self.input_ids = self.token_encode_multiprocess(tokenizer=tokenizer, sentences=sentences)
         self.attention_masks = self.attention_mask(self.input_ids)
 
-        return self.create_itrator_for_dataset(self.input_ids, self.attention_masks)
+        # 当是unlabelDataset才执行返回， labeldataset会在继承的函数中返回
+        if not is_super:
+            return self.create_itrator_for_dataset(self.input_ids, self.attention_masks)
 
     def token_encode(self, partial, sentences):
         '''
@@ -87,22 +146,37 @@ class Dataset():
     def create_itrator_for_dataset(self, input_ids=None, attention_masks=None, label_arg=None):
         '''
         把input_id,att_mask,label(如果有)转换成dataloader
-        :param kwargs:
+        会被labelDataset继承，此时label_arg会被赋值
         :return: dataloader
         '''
         assert input_ids and attention_masks, f'input_ids,attention_masks必须被赋值!'
 
         inputs, masks = torch.tensor(input_ids), torch.tensor(attention_masks)
-        if label_arg == None:
-            input_data = tud.TensorDataset(inputs, masks)
+
+        # region 依据每天微博数，variable batch size
+        if not label_arg:
+            input_data = TensorDataset(inputs, masks, preprocessed_data=self.preprocessed_data.cleaned_data)
         else:
             labels = torch.tensor(label_arg)
-            input_data = tud.TensorDataset(inputs, masks, labels)
+            input_data = TensorDataset(inputs, masks, labels, preprocessed_data=self.preprocessed_data.cleaned_data)
 
-        input_sampler = tud.SequentialSampler(input_data)
+        input_sampler = SequentialSampler(input_data)
 
-        return tud.DataLoader(input_data, sampler=input_sampler,
-                              batch_size=int(utils.cfg.get('HYPER_PARAMETER', 'batch_size')), num_workers=4)
+        return tud.DataLoader(input_data, batch_sampler=input_sampler, num_workers=4)
+        # endregion
+
+        # # region 正常loaddataset
+        # if label_arg == None:
+        #     input_data = tud.TensorDataset(inputs, masks)
+        # else:
+        #     labels = torch.tensor(label_arg)
+        #     input_data = tud.TensorDataset(inputs, masks, labels)
+        #
+        # input_sampler = tud.SequentialSampler(input_data)
+        #
+        # return tud.DataLoader(input_data, sampler=input_sampler,
+        #                       batch_size=int(utils.cfg.get('HYPER_PARAMETER', 'batch_size')), num_workers=4)
+        # # endregion
 
 
 class LabeledDataset(Dataset):
@@ -321,7 +395,7 @@ def test(model=None):
 
     test_set = dp.TestDataset()
     ul = Dataset(test_set, tokenizer)
-    predict_dataloader = ul.get_dataloader()
+    predict_dataloader = ul.get_dataloader(is_super=False)
 
     predictions = []
     for batch in tqdm.tqdm(predict_dataloader):
@@ -336,7 +410,7 @@ def test(model=None):
 
     # bayes
     # predictions = hashtag.bayes(predictions)
-    predictions = sentiment_bayes.bayes(predictions, 5)
+    predictions = sentiment_bayes.bayes(predictions, 1)
 
     predict_labels = []
     for i in range(len(predictions)): predict_labels.append(np.argmax(predictions[i], axis=1).flatten().tolist())
@@ -364,6 +438,6 @@ def format_time(elapsed):
 
 
 if __name__ == '__main__':
-    # train()
+    train()
 
     test()

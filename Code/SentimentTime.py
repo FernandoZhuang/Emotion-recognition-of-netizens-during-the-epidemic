@@ -93,7 +93,6 @@ class SentimentTime():
 
         return res
 
-#
 # if __name__ == '__main__':
 #     worker = SentimentTime(test=True)
 #     worker.bayes(list())

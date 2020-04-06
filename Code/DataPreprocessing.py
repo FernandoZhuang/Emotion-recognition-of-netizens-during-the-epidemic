@@ -209,19 +209,22 @@ class Dataset(pd.DataFrame):
         else:
             dateparser = lambda x: pd.datetime.strptime(x, '%m月%d日 %H:%M')
             if type_ == DatasetType.LABELED:
-                self._data = pd.read_csv(path, usecols=[0, 1, 2, 3, 4, 5, 6], parse_dates=['微博发布时间'],
-                                         date_parser=dateparser)._data
+                df = pd.read_csv(path, usecols=[0, 1, 2, 3, 4, 5, 6], parse_dates=['微博发布时间'], date_parser=dateparser)
+                # 配合动态设置batch_size使用，如果不启用功能，则注释该行
+                df.sort_values(by='微博发布时间', inplace=True)
+                self._data = df._data
                 print('已读入标注数据集')
                 self.columns = ['id', 'datetime', 'poster', 'content', 'image', 'video', 'sentiment']
-                # self.index.name = 'ID'
+                self.index.name = 'ID'
             else:
                 # 若要区分train unlabel test，则可基于本else代码段重新改写
-                self._data = pd.read_csv(path, index_col=['微博id'], parse_dates=['微博发布时间'],
-                                         date_parser=dateparser)._data
+                df = pd.read_csv(path, usecols=[0, 1, 2, 3, 4, 5, 6], parse_dates=['微博发布时间'], date_parser=dateparser)
+                # 配合动态设置batch_size使用，如果不启用功能，则注释该行
+                df.sort_values(by='微博发布时间', inplace=True)
+                self._data = df._data
                 print('已读入无标注数据集')
                 self.columns = ['datetime', 'poster', 'content', 'image', 'video']
                 self.index.name = 'ID'
-                # self.datetime += pd.Timedelta(120 * 365, unit='d')
 
         self._cleaned_data = None
         self._cat_hashtags = None
