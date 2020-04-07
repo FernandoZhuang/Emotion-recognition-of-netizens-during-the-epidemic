@@ -11,6 +11,7 @@ import Emoj
 
 class Hashtag():
     def __init__(self, train_label=False, train_unlabel=False, test=False):
+        print('---Hashtag初始化---')
         if train_label: self.train_label = dp.LabeledDataset(2).cleaned_data
         if train_unlabel: self.train_unlabel = dp.UnlabeledDataset(2).cleaned_data
         if test: self.test = dp.TestDataset(2).cleaned_data

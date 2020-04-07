@@ -3,6 +3,7 @@ import os
 import pandas as pd
 import numpy as np
 import time
+import torch
 
 import my_setting.utils as utils
 import DataPreprocessing as dp
@@ -10,6 +11,7 @@ import DataPreprocessing as dp
 
 class SentimentTime():
     def __init__(self, train_label=False, train_unlabel=False, test=False):
+        print('---SentimentTime初始化---')
         if train_label: self.train_label = dp.LabeledDataset(1).cleaned_data
         if train_unlabel: self.train_unlabel = dp.UnlabeledDataset(1).cleaned_data
         if test: self.test = dp.TestDataset(1).cleaned_data
@@ -69,9 +71,47 @@ class SentimentTime():
         res.to_csv(utils.cfg.get('PROCESSED_DATA', 'window_time_sentiment_path'))
         return res
 
-    def bayes(self, logits: list, window: int = 1):
+    @property
+    def _batch_sizes(self):
+        batch_size = []
+        day, former, cnt = self.train_label['datetime'].dt.day, 1, 0
+
+        for i in day:
+            if i != former:
+                batch_size.append(cnt)
+                former, cnt = i, 0
+            else:
+                cnt += 1
+
+        return batch_size
+
+    def bayes_train(self, logits: list, labels, total_batch_num: int, window: int = 1):
+        r'''
+        在train阶段，依据情感极性随时间变化纠正神经网络输出
+        :return:
         '''
-        依据情感极性随时间变化纠正神经网络输出
+        logits = logits.detach().cpu().numpy()
+        window_record = self.window_time_sentiment(window)
+        tmp, day_index, res = 0, 0, []
+        for index, i in enumerate(self._batch_sizes):
+            tmp += i
+            if total_batch_num <= tmp:
+                day_index = index + 1
+                break
+
+        res = []
+        for logit in logits:
+            res += [[window_record.loc[day_index][i] * logit[i] for i in range(3)]]
+
+        res = torch.from_numpy(np.asarray(res)).to('cuda')
+        loss_fct = torch.nn.CrossEntropyLoss()
+        loss = loss_fct(res.view(-1, 3), labels.view(-1))
+
+        return loss
+
+    def bayes_test(self, logits: list, window: int = 1):
+        '''
+        在test阶段，依据情感极性随时间变化纠正神经网络输出
         :param window代表使用多长时间范围纠正
         :return:
         '''

@@ -218,7 +218,7 @@ class Dataset(pd.DataFrame):
                 self.index.name = 'ID'
             else:
                 # 若要区分train unlabel test，则可基于本else代码段重新改写
-                df = pd.read_csv(path, usecols=[0, 1, 2, 3, 4, 5, 6], parse_dates=['微博发布时间'], date_parser=dateparser)
+                df = pd.read_csv(path, index_col=['微博id'], parse_dates=['微博发布时间'], date_parser=dateparser)
                 # 配合动态设置batch_size使用，如果不启用功能，则注释该行
                 df.sort_values(by='微博发布时间', inplace=True)
                 self._data = df._data

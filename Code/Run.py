@@ -28,6 +28,8 @@ import itertools
 class TensorDataset(tud.Dataset):
     r'''
     根据每天的微博数，分别获取动态batch_size
+    由于每天的微博数两在1K以上，若把1K量级数作为Batch_size，不合适
+    于是再把每天的微博数细分到mini-batch
     '''
 
     def __init__(self, *args, **kwargs):
@@ -39,7 +41,7 @@ class TensorDataset(tud.Dataset):
         self.batch_size = []
         cnt, former = 0, 1
         for i in self.day:
-            if i != former:
+            if i != former or cnt + 1 > int(utils.cfg.get('HYPER_PARAMETER', 'batch_size')):
                 self.batch_size.append(cnt)
                 former, cnt = i, 0
             else:
@@ -81,13 +83,13 @@ class SequentialSampler(tud.Sampler):
         return len(self.data_source)
 
 
-
 class Dataset():
-    def __init__(self, preprocessed_data=None, tokenizer=None):
+    def __init__(self, preprocessed_data=None, tokenizer=None, use_variable_batch=False):
         super(Dataset, self).__init__()
 
         self.preprocessed_data = preprocessed_data
         self.tokenizer = tokenizer
+        self.use_variable_batch = use_variable_batch
 
     def get_dataloader(self, is_super=True):
         cleaned_data = self.preprocessed_data.cleaned_data
@@ -153,56 +155,47 @@ class Dataset():
 
         inputs, masks = torch.tensor(input_ids), torch.tensor(attention_masks)
 
-        # region 依据每天微博数，variable batch size
-        if not label_arg:
-            input_data = TensorDataset(inputs, masks, preprocessed_data=self.preprocessed_data.cleaned_data)
+        if self.use_variable_batch:
+            # 依据每天微博数，variable batch size
+            if not label_arg:
+                input_data = TensorDataset(inputs, masks, preprocessed_data=self.preprocessed_data.cleaned_data)
+            else:
+                labels = torch.tensor(label_arg)
+                input_data = TensorDataset(inputs, masks, labels, preprocessed_data=self.preprocessed_data.cleaned_data)
+
+            input_sampler = SequentialSampler(input_data)
+
+            return tud.DataLoader(input_data, batch_sampler=input_sampler, shuffle=False, num_workers=4)
         else:
-            labels = torch.tensor(label_arg)
-            input_data = TensorDataset(inputs, masks, labels, preprocessed_data=self.preprocessed_data.cleaned_data)
+            # 正常loaddataset
+            if label_arg == None:
+                input_data = tud.TensorDataset(inputs, masks)
+            else:
+                labels = torch.tensor(label_arg)
+                input_data = tud.TensorDataset(inputs, masks, labels)
 
-        input_sampler = SequentialSampler(input_data)
+            input_sampler = tud.SequentialSampler(input_data)
 
-        return tud.DataLoader(input_data, batch_sampler=input_sampler, num_workers=4)
-        # endregion
-
-        # # region 正常loaddataset
-        # if label_arg == None:
-        #     input_data = tud.TensorDataset(inputs, masks)
-        # else:
-        #     labels = torch.tensor(label_arg)
-        #     input_data = tud.TensorDataset(inputs, masks, labels)
-        #
-        # input_sampler = tud.SequentialSampler(input_data)
-        #
-        # return tud.DataLoader(input_data, sampler=input_sampler,
-        #                       batch_size=int(utils.cfg.get('HYPER_PARAMETER', 'batch_size')), num_workers=4)
-        # # endregion
+            return tud.DataLoader(input_data, sampler=input_sampler, shuffle=False,
+                                  batch_size=int(utils.cfg.get('HYPER_PARAMETER', 'batch_size')), num_workers=4)
 
 
 class LabeledDataset(Dataset):
-    def __init__(self, preprocessed_data=None, tokenizer=None):
-        super(LabeledDataset, self).__init__(preprocessed_data, tokenizer)
+    def __init__(self, preprocessed_data=None, tokenizer=None, use_variable_batch=False):
+        super(LabeledDataset, self).__init__(preprocessed_data, tokenizer, use_variable_batch)
 
     def get_dataloader(self):
-        # 把input_ids attention_masks 赋值
+        # 把input_ids attention_masks 赋值, 此时不调用create_iter
         super().get_dataloader()
-        # TODO labels要不要做私有属性?
         labels = self.preprocessed_data.cleaned_data.sentiment.values
         labels = labels.tolist()
 
-        train_inputs, validation_inputs, train_labels, validation_labels = sms.train_test_split(self.input_ids, labels,
-                                                                                                random_state=2018,
-                                                                                                test_size=float(
-                                                                                                    utils.cfg.get(
-                                                                                                        'HYPER_PARAMETER',
-                                                                                                        'test_size')))
-        train_masks, validation_masks, _, _ = sms.train_test_split(self.attention_masks, labels, random_state=2018,
-                                                                   test_size=float(
-                                                                       utils.cfg.get('HYPER_PARAMETER', 'test_size')))
+        train_inputs, validation_inputs, train_masks, validation_masks, train_labels, validation_labels = sms.train_test_split(
+            self.input_ids, self.attention_masks, labels, random_state=2018,
+            test_size=float(utils.cfg.get('HYPER_PARAMETER', 'test_size')))
 
         train_dataloader = self.create_itrator_for_dataset(train_inputs, train_masks, train_labels)
         validation_dataloader = self.create_itrator_for_dataset(validation_inputs, validation_masks, validation_labels)
-
         return train_dataloader, validation_dataloader
 
 
@@ -266,14 +259,16 @@ class BertForSeqClassification(torch.nn.Module):
         return outputs
 
 
-def train():
+def train(use_variable_batch=False):
     '''
     默认fine-tune后，紧接着预测。可注释，从本地加载再预测
     '''
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     seed()
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    sentiment_bayes = st.SentimentTime(train_label=True)
 
-    ld = LabeledDataset(preprocessed_data=dp.LabeledDataset(), tokenizer=None)
+    ld = LabeledDataset(preprocessed_data=dp.LabeledDataset(), tokenizer=None,
+                        use_variable_batch=utils.cfg.get('HYPER_PARAMETER', 'use_variable_batch'))
     # 如果要拼接隐藏层和pool out，此处实例化需要相应传参数
     # model = BertForSeqClassification(hidden_layers=2, pool_out=True, labels=3).to(device)
     model = BertForSeqClassification(labels=3).to(device)
@@ -303,7 +298,7 @@ def train():
         print('Training...')
 
         t0 = time.time()
-        total_loss = 0
+        total_loss, batch_cnt = 0, 0
         model.train()
 
         for step, batch in enumerate(train_dataloader):
@@ -314,10 +309,12 @@ def train():
             b_input_ids = batch[0].to(device)
             b_input_mask = batch[1].to(device)
             b_labels = batch[2].to(device)
+            batch_cnt += b_input_ids.shape[0]
 
             model.zero_grad()
             outputs = model(b_input_ids, attention_mask=b_input_mask, label_vec=b_labels)
-            loss = outputs[0]
+            loss = outputs[0] if not use_variable_batch else sentiment_bayes.bayes_train(outputs[1], b_labels,
+                                                                                         batch_cnt, 1)
             total_loss += loss.item()
             loss.backward()
             torch.nn.utils.clip_grad_norm(model.parameters(), 1.0)
@@ -377,8 +374,6 @@ def train():
 def test(model=None):
     print('Predicting labels in test sentences...')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    hashtag = ht.Hashtag(train_label=True, test=True)
-    sentiment_bayes = st.SentimentTime(test=True)
 
     if model is None:
         model = BertForSeqClassification()
@@ -409,8 +404,10 @@ def test(model=None):
         predictions.append(logits)
 
     # bayes
+    # hashtag = ht.Hashtag(train_label=True, test=True)
+    # sentiment_bayes = st.SentimentTime(test=True)
     # predictions = hashtag.bayes(predictions)
-    predictions = sentiment_bayes.bayes(predictions, 1)
+    # predictions = sentiment_bayes.bayes(predictions, 1)
 
     predict_labels = []
     for i in range(len(predictions)): predict_labels.append(np.argmax(predictions[i], axis=1).flatten().tolist())
@@ -438,6 +435,6 @@ def format_time(elapsed):
 
 
 if __name__ == '__main__':
-    train()
+    train(use_variable_batch=utils.cfg.get('HYPER_PARAMETER', 'use_variable_batch'))
 
     test()
