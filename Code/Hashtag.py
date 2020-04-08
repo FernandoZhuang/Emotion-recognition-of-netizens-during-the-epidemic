@@ -11,10 +11,9 @@ import Emoj
 
 class Hashtag():
     def __init__(self, train_label=False, train_unlabel=False, test=False):
-        print('---Hashtag初始化---')
-        if train_label: self.train_label = dp.LabeledDataset(2).cleaned_data
-        if train_unlabel: self.train_unlabel = dp.UnlabeledDataset(2).cleaned_data
-        if test: self.test = dp.TestDataset(2).cleaned_data
+        if train_label is not False: self.train_label = train_label.cleaned_data
+        if train_unlabel is not False: self.train_unlabel = train_unlabel.cleaned_data
+        if test is not False: self.test = test.cleaned_data
         # TODO 计划根据传递的动态化初始参数,例如train_label,train_unlabel,test都为True，支持同时返回对应hashtag，则content因为list
         self.content = self.train_label['content'].to_list()
         self.label = self.train_label['sentiment'].to_list()

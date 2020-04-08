@@ -35,7 +35,8 @@ class TensorDataset(tud.Dataset):
     def __init__(self, *args, **kwargs):
         assert all(args[0].size(0) == tensor.size(0) for tensor in args)
         self.tensors = args
-        self.day = kwargs['preprocessed_data']['datetime'].dt.day
+        self.day = (kwargs['preprocessed_data']['datetime'].dt.month - 1) * 31 + kwargs['preprocessed_data'][
+            'datetime'].dt.day
         self.cluster_indices = [i for i in range(len(self.day))]
 
         self.batch_size = []
@@ -44,8 +45,9 @@ class TensorDataset(tud.Dataset):
             if i != former or cnt + 1 > int(utils.cfg.get('HYPER_PARAMETER', 'batch_size')):
                 self.batch_size.append(cnt)
                 former, cnt = i, 0
-            else:
-                cnt += 1
+            cnt += 1
+        self.batch_size.append(cnt)  # 把组后一天的也加入
+
 
     def __getitem__(self, index):
         return tuple(tensor[index] for tensor in self.tensors)
@@ -59,7 +61,7 @@ class SequentialSampler(tud.Sampler):
     依据动态batch_size，调整每个batch内的序号数
     '''
 
-    def __init__(self, data_source, batch_size=None, shuffle=True):
+    def __init__(self, data_source, batch_size=None, shuffle=False):
         self.data_source = data_source
         self.batch_sizes = self.data_source.batch_size
         self.shuffle = shuffle
@@ -84,7 +86,7 @@ class SequentialSampler(tud.Sampler):
 
 
 class Dataset():
-    def __init__(self, preprocessed_data=None, tokenizer=None, use_variable_batch=False):
+    def __init__(self, preprocessed_data=None, tokenizer=None, use_variable_batch=0):
         super(Dataset, self).__init__()
 
         self.preprocessed_data = preprocessed_data
@@ -200,13 +202,14 @@ class LabeledDataset(Dataset):
 
 
 class BertForSeqClassification(torch.nn.Module):
-    def __init__(self, hidden_layers=None, pool_out=None, labels=3):
+    def __init__(self, hidden_layers=None, pool_out=None, labels=3, train_label=None):
         '''
         :param hidden_layers:
         :param pool_out:
         :param labels:
         '''
         super(BertForSeqClassification, self).__init__()
+        if train_label: self.train_label = train_label.cleaneD_data
         self._hidden_size = 768
         self.hidden_layers, self.pool_out, self.labels = hidden_layers, pool_out, labels
 
@@ -232,11 +235,15 @@ class BertForSeqClassification(torch.nn.Module):
         else:
             return torch.nn.Linear(self._hidden_size * self.hidden_layers + self.labels, self.labels).to(device)
 
-    def forward(self, b_input_ids, attention_mask, label_vec=None):
+    def forward(self, b_input_ids, attention_mask, label_vec=None, window_record=None, day_index=0):
         outputs = self.bert(b_input_ids, token_type_ids=None, attention_mask=attention_mask, labels=label_vec)
 
         if self.hidden_layers is not None:
             outputs = self._concatenate_hidden_layer_pool_out(outputs, label_vec)
+
+        # 注释代码会引起gpu内存不足，把本部分代码放在SentimentTime类中实现，暂时的解决方案
+        # if window_record is not None:
+        #     outputs = (self._bayes_time(outputs[1], label_vec, window_record, day_index), ) + outputs[1:]
 
         return outputs
 
@@ -249,26 +256,45 @@ class BertForSeqClassification(torch.nn.Module):
 
         if label_vec is not None:
             loss = self.loss(logits.view(-1, self.labels), label_vec.view(-1))
-            outputs = [loss, ]
-            outputs = outputs + [torch.nn.functional.softmax(logits, -1)]
+            outputs = (loss,)
+            outputs = outputs + tuple(torch.nn.functional.softmax(logits, -1))
             # outputs = outputs + [logits]
         else:
-            outputs = [torch.nn.functional.softmax(logits, -1)]
+            outputs = tuple(torch.nn.functional.softmax(logits, -1))
             # outputs=[logits]
 
         return outputs
 
+    def _bayes_time(self, logits, labels, window_record, day_index):
+        r'''
+        在train阶段，依据情感极性随时间变化纠正神经网络输出
+        :return: loss
+        '''
+        res = torch.tensor([], requires_grad=True)
+        probability = torch.tensor(window_record.loc[day_index], requires_grad=False)
+        for logit in logits:
+            tmp = torch.tensor([probability[i] * logit[i] for i in range(3)])
+            res = torch.cat((res, tmp), 0)
 
-def train(use_variable_batch=False):
+        res = res.to('cuda')
+        loss = self.loss(res.view(-1, self.labels), labels.view(-1))
+
+        return loss
+
+
+def train(use_variable_batch=0):
     '''
     默认fine-tune后，紧接着预测。可注释，从本地加载再预测
     '''
     seed()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    sentiment_bayes = st.SentimentTime(train_label=True)
+    preprocessed_data = dp.LabeledDataset()
+    sentiment_bayes = st.SentimentTime(train_label=preprocessed_data)
+    window_record = sentiment_bayes.window_time_sentiment(window=1)
+    batch_size = batch_sizes(preprocessed_data.cleaned_data)
 
-    ld = LabeledDataset(preprocessed_data=dp.LabeledDataset(), tokenizer=None,
-                        use_variable_batch=utils.cfg.get('HYPER_PARAMETER', 'use_variable_batch'))
+    ld = LabeledDataset(preprocessed_data=preprocessed_data, tokenizer=None,
+                        use_variable_batch=int(utils.cfg.get('HYPER_PARAMETER', 'use_variable_batch')))
     # 如果要拼接隐藏层和pool out，此处实例化需要相应传参数
     # model = BertForSeqClassification(hidden_layers=2, pool_out=True, labels=3).to(device)
     model = BertForSeqClassification(labels=3).to(device)
@@ -310,9 +336,12 @@ def train(use_variable_batch=False):
             b_input_mask = batch[1].to(device)
             b_labels = batch[2].to(device)
             batch_cnt += b_input_ids.shape[0]
+            day_index = cal_day_index(batch_size, batch_cnt)
 
             model.zero_grad()
-            outputs = model(b_input_ids, attention_mask=b_input_mask, label_vec=b_labels)
+            outputs = model(b_input_ids, attention_mask=b_input_mask, label_vec=b_labels, window_record=window_record,
+                            day_index=day_index)
+            # loss = outputs[0]
             loss = outputs[0] if not use_variable_batch else sentiment_bayes.bayes_train(outputs[1], b_labels,
                                                                                          batch_cnt, 1)
             total_loss += loss.item()
@@ -404,8 +433,9 @@ def test(model=None):
         predictions.append(logits)
 
     # bayes
-    # hashtag = ht.Hashtag(train_label=True, test=True)
-    # sentiment_bayes = st.SentimentTime(test=True)
+    # train_label = dp.LabeledDataset()
+    # hashtag = ht.Hashtag(train_label=True, test=test_set)
+    # sentiment_bayes = st.SentimentTime(test=test_set)
     # predictions = hashtag.bayes(predictions)
     # predictions = sentiment_bayes.bayes(predictions, 1)
 
@@ -414,6 +444,32 @@ def test(model=None):
     test_set.fill_result(list(itertools.chain(*predict_labels)))  # 把多个list合并成一个list
     test_set.submit()
     print('    DONE.')
+
+
+def batch_sizes(train_label):
+    batch_size = []
+    day, former, cnt = train_label['datetime'].dt.day, 1, 0
+
+    for i in day:
+        if i != former:
+            batch_size.append(cnt)
+            former, cnt = i, 0
+        else:
+            cnt += 1
+
+    return batch_size
+
+
+def cal_day_index(batch_sizes, total_batch_num):
+    tmp = 0
+
+    for index, i in enumerate(batch_sizes):
+        tmp += i
+        if total_batch_num <= tmp:
+            day_index = index + 1
+            break
+
+    return day_index
 
 
 def seed():
@@ -435,6 +491,6 @@ def format_time(elapsed):
 
 
 if __name__ == '__main__':
-    train(use_variable_batch=utils.cfg.get('HYPER_PARAMETER', 'use_variable_batch'))
+    train(use_variable_batch=int(utils.cfg.get('HYPER_PARAMETER', 'use_variable_batch')))
 
     test()

@@ -11,10 +11,9 @@ import DataPreprocessing as dp
 
 class SentimentTime():
     def __init__(self, train_label=False, train_unlabel=False, test=False):
-        print('---SentimentTime初始化---')
-        if train_label: self.train_label = dp.LabeledDataset(1).cleaned_data
-        if train_unlabel: self.train_unlabel = dp.UnlabeledDataset(1).cleaned_data
-        if test: self.test = dp.TestDataset(1).cleaned_data
+        if train_label is not False: self.train_label = train_label.cleaned_data
+        if train_unlabel is not False: self.train_unlabel = train_unlabel.cleaned_data
+        if test is not False: self.test = test.cleaned_data
 
     def everyday_sentiment(self):
         '''
@@ -104,6 +103,7 @@ class SentimentTime():
             res += [[window_record.loc[day_index][i] * logit[i] for i in range(3)]]
 
         res = torch.from_numpy(np.asarray(res)).to('cuda')
+        res.requires_grad = True
         loss_fct = torch.nn.CrossEntropyLoss()
         loss = loss_fct(res.view(-1, 3), labels.view(-1))
 
