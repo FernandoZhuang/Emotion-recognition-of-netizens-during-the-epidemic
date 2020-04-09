@@ -46,8 +46,7 @@ class TensorDataset(tud.Dataset):
                 self.batch_size.append(cnt)
                 former, cnt = i, 0
             cnt += 1
-        self.batch_size.append(cnt)  # 把组后一天的也加入
-
+        self.batch_size.append(cnt)  # 把最后一天的也加入
 
     def __getitem__(self, index):
         return tuple(tensor[index] for tensor in self.tensors)
@@ -191,14 +190,15 @@ class LabeledDataset(Dataset):
         super().get_dataloader()
         labels = self.preprocessed_data.cleaned_data.sentiment.values
         labels = labels.tolist()
+        index = [i for i in range(len(labels))]
 
-        train_inputs, validation_inputs, train_masks, validation_masks, train_labels, validation_labels = sms.train_test_split(
-            self.input_ids, self.attention_masks, labels, random_state=2018,
+        train_inputs, validation_inputs, train_masks, validation_masks, train_labels, validation_labels, train_index, validation_index = sms.train_test_split(
+            self.input_ids, self.attention_masks, labels, index, random_state=2018,
             test_size=float(utils.cfg.get('HYPER_PARAMETER', 'test_size')))
 
         train_dataloader = self.create_itrator_for_dataset(train_inputs, train_masks, train_labels)
         validation_dataloader = self.create_itrator_for_dataset(validation_inputs, validation_masks, validation_labels)
-        return train_dataloader, validation_dataloader
+        return train_dataloader, validation_dataloader, train_index, validation_index
 
 
 class BertForSeqClassification(torch.nn.Module):
@@ -235,15 +235,14 @@ class BertForSeqClassification(torch.nn.Module):
         else:
             return torch.nn.Linear(self._hidden_size * self.hidden_layers + self.labels, self.labels).to(device)
 
-    def forward(self, b_input_ids, attention_mask, label_vec=None, window_record=None, day_index=0):
+    def forward(self, b_input_ids, attention_mask, label_vec=None, window_record=None, day_index=[]):
         outputs = self.bert(b_input_ids, token_type_ids=None, attention_mask=attention_mask, labels=label_vec)
 
         if self.hidden_layers is not None:
             outputs = self._concatenate_hidden_layer_pool_out(outputs, label_vec)
-
         # 注释代码会引起gpu内存不足，把本部分代码放在SentimentTime类中实现，暂时的解决方案
         # if window_record is not None:
-        #     outputs = (self._bayes_time(outputs[1], label_vec, window_record, day_index), ) + outputs[1:]
+        #     outputs = (self._bayes_time(outputs[1], label_vec, window_record, day_index),) + outputs[1:]
 
         return outputs
 
@@ -265,15 +264,16 @@ class BertForSeqClassification(torch.nn.Module):
 
         return outputs
 
-    def _bayes_time(self, logits, labels, window_record, day_index):
+    def _bayes_time(self, logits, labels, window_record, day_index: list):
         r'''
         在train阶段，依据情感极性随时间变化纠正神经网络输出
         :return: loss
         '''
-        res = torch.tensor([], requires_grad=True)
-        probability = torch.tensor(window_record.loc[day_index], requires_grad=False)
-        for logit in logits:
-            tmp = torch.tensor([probability[i] * logit[i] for i in range(3)])
+        res = torch.tensor([], requires_grad=True).double()
+        probability = torch.from_numpy(window_record.loc[day_index].astype(float).values)
+        probability.requires_grad = False
+        for index, logit in enumerate(logits):
+            tmp = torch.tensor([probability[index][i] * logit[i] for i in range(3)])
             res = torch.cat((res, tmp), 0)
 
         res = res.to('cuda')
@@ -282,7 +282,7 @@ class BertForSeqClassification(torch.nn.Module):
         return loss
 
 
-def train(use_variable_batch=0):
+def train(use_variable_batch=0, train_bayes=0):
     '''
     默认fine-tune后，紧接着预测。可注释，从本地加载再预测
     '''
@@ -291,7 +291,6 @@ def train(use_variable_batch=0):
     preprocessed_data = dp.LabeledDataset()
     sentiment_bayes = st.SentimentTime(train_label=preprocessed_data)
     window_record = sentiment_bayes.window_time_sentiment(window=1)
-    batch_size = batch_sizes(preprocessed_data.cleaned_data)
 
     ld = LabeledDataset(preprocessed_data=preprocessed_data, tokenizer=None,
                         use_variable_batch=int(utils.cfg.get('HYPER_PARAMETER', 'use_variable_batch')))
@@ -300,7 +299,7 @@ def train(use_variable_batch=0):
     model = BertForSeqClassification(labels=3).to(device)
     loss_values = []
 
-    train_dataloader, validation_dataloader = ld.get_dataloader()
+    train_dataloader, validation_dataloader, train_index, validation_index = ld.get_dataloader()
     epochs = int(utils.cfg.get('HYPER_PARAMETER', 'epochs'))
     train_steps = len(train_dataloader) * epochs
 
@@ -335,15 +334,14 @@ def train(use_variable_batch=0):
             b_input_ids = batch[0].to(device)
             b_input_mask = batch[1].to(device)
             b_labels = batch[2].to(device)
+
+            day_index = cal_day_index(train_index, batch_cnt, b_input_ids.shape[0], preprocessed_data.cleaned_data)
             batch_cnt += b_input_ids.shape[0]
-            day_index = cal_day_index(batch_size, batch_cnt)
 
             model.zero_grad()
             outputs = model(b_input_ids, attention_mask=b_input_mask, label_vec=b_labels, window_record=window_record,
                             day_index=day_index)
-            # loss = outputs[0]
-            loss = outputs[0] if not use_variable_batch else sentiment_bayes.bayes_train(outputs[1], b_labels,
-                                                                                         batch_cnt, 1)
+            loss = outputs[0] if train_bayes == 0 else sentiment_bayes.bayes_train(outputs[1], b_labels, day_index, 1)
             total_loss += loss.item()
             loss.backward()
             torch.nn.utils.clip_grad_norm(model.parameters(), 1.0)
@@ -361,18 +359,21 @@ def train(use_variable_batch=0):
 
         model.eval()
         eval_loss, eval_accuracy = 0, 0
-        nb_eval_steps, nb_eval_examples = 0, 0
+        nb_eval_steps, nb_eval_examples, batch_cnt = 0, 0, 0
 
         for batch in validation_dataloader:
             batch = tuple(t.to(device) for t in batch)
             b_input_ids, b_input_mask, b_labels = batch
 
+            day_index = cal_day_index(validation_index, batch_cnt, b_input_ids.shape[0], preprocessed_data.cleaned_data)
+            batch_cnt += b_input_ids.shape[0]
+
             with torch.no_grad():
                 outputs = model(b_input_ids, attention_mask=b_input_mask)
-                logits = outputs[0]
+                logits = outputs[0] if train_bayes == 0 else sentiment_bayes.bayes_train(outputs[0], labels=None,
+                                                                                         day_index=day_index, window=1)
                 logits = logits.detach().cpu().numpy()
                 label_ids = b_labels.to('cpu').numpy()
-
                 tmp_eval_accuracy = flat_accuracy(logits, label_ids)
                 eval_accuracy += tmp_eval_accuracy
                 nb_eval_steps += 1
@@ -446,30 +447,12 @@ def test(model=None):
     print('    DONE.')
 
 
-def batch_sizes(train_label):
-    batch_size = []
-    day, former, cnt = train_label['datetime'].dt.day, 1, 0
+def cal_day_index(index, start, offset, weibo_data):
+    index_range = index[start:start + offset]
+    selected_weibo_data = weibo_data.iloc[index_range]
+    day_index = ((selected_weibo_data['datetime'].dt.month - 1) * 31 + selected_weibo_data['datetime'].dt.day)
 
-    for i in day:
-        if i != former:
-            batch_size.append(cnt)
-            former, cnt = i, 0
-        else:
-            cnt += 1
-
-    return batch_size
-
-
-def cal_day_index(batch_sizes, total_batch_num):
-    tmp = 0
-
-    for index, i in enumerate(batch_sizes):
-        tmp += i
-        if total_batch_num <= tmp:
-            day_index = index + 1
-            break
-
-    return day_index
+    return day_index.to_list()
 
 
 def seed():
@@ -491,6 +474,9 @@ def format_time(elapsed):
 
 
 if __name__ == '__main__':
-    train(use_variable_batch=int(utils.cfg.get('HYPER_PARAMETER', 'use_variable_batch')))
+    use_variable_batch = int(utils.cfg.get('HYPER_PARAMETER', 'use_variable_batch'))
+    train_bayes = int(utils.cfg.get('HYPER_PARAMETER', 'train_bayes'))
+
+    train(use_variable_batch=use_variable_batch, train_bayes=train_bayes)
 
     test()

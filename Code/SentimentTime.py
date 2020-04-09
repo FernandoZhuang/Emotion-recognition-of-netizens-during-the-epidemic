@@ -70,39 +70,22 @@ class SentimentTime():
         res.to_csv(utils.cfg.get('PROCESSED_DATA', 'window_time_sentiment_path'))
         return res
 
-    @property
-    def _batch_sizes(self):
-        batch_size = []
-        day, former, cnt = self.train_label['datetime'].dt.day, 1, 0
-
-        for i in day:
-            if i != former:
-                batch_size.append(cnt)
-                former, cnt = i, 0
-            else:
-                cnt += 1
-
-        return batch_size
-
-    def bayes_train(self, logits: list, labels, total_batch_num: int, window: int = 1):
+    def bayes_train(self, logits: list, labels=None, day_index: list = [], window: int = 1):
         r'''
         在train阶段，依据情感极性随时间变化纠正神经网络输出
         :return:
         '''
         logits = logits.detach().cpu().numpy()
         window_record = self.window_time_sentiment(window)
-        tmp, day_index, res = 0, 0, []
-        for index, i in enumerate(self._batch_sizes):
-            tmp += i
-            if total_batch_num <= tmp:
-                day_index = index + 1
-                break
 
-        res = []
-        for logit in logits:
-            res += [[window_record.loc[day_index][i] * logit[i] for i in range(3)]]
+        res, probability = [], window_record.loc[day_index]
+        for index, logit in enumerate(logits):
+            res += [[probability.iloc[index][i] * logit[i] for i in range(3)]]
 
         res = torch.from_numpy(np.asarray(res)).to('cuda')
+        # Validation部分，返回logits
+        if labels is None: return res
+
         res.requires_grad = True
         loss_fct = torch.nn.CrossEntropyLoss()
         loss = loss_fct(res.view(-1, 3), labels.view(-1))
