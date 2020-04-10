@@ -56,6 +56,11 @@
 
 1. [文本分类综述](https://zhuanlan.zhihu.com/p/76003775)
 
+### Time Series
+
+1. [Sentiment Analysis on Time-Series Data Using Weight Priority Method on Deep Learning](https://ieeexplore.ieee.org/document/8816985)
+2. [Real Time Sentiment Change Detection of Twitter Data Streams](Real Time Sentiment Change Detection of Twitter Data Streams)
+
 ### Misc
 
 1. [Using Convolutional Neural Net for Sentiment Analysis ](https://github.com/Theo-/sentiment-analysis-keras-conv)
