@@ -1,7 +1,11 @@
 '''
 Learn from
-https://mccormickml.com/2019/07/22/BERT-fine-tuning/#1-setup
-https://towardsdatascience.com/bert-classifier-just-another-pytorch-model-881b3cf05784
+    https://mccormickml.com/2019/07/22/BERT-fine-tuning/#1-setup
+    https://towardsdatascience.com/bert-classifier-just-another-pytorch-model-881b3cf05784
+Depreciated
+    先验知识 bayes相关函数
+    动态batchsize
+    时间层面特征
 '''
 
 import torch
@@ -25,63 +29,64 @@ import SentimentTime as st
 import itertools
 
 
-class TensorDataset(tud.Dataset):
-    r'''
-    根据每天的微博数，分别获取动态batch_size
-    由于每天的微博数两在1K以上，若把1K量级数作为Batch_size，不合适
-    于是再把每天的微博数细分到mini-batch
-    '''
-
-    def __init__(self, *args, **kwargs):
-        assert all(args[0].size(0) == tensor.size(0) for tensor in args)
-        self.tensors = args
-        self.day = (kwargs['preprocessed_data']['datetime'].dt.month - 1) * 31 + kwargs['preprocessed_data'][
-            'datetime'].dt.day
-        self.cluster_indices = [i for i in range(len(self.day))]
-
-        self.batch_size = []
-        cnt, former = 0, 1
-        for i in self.day:
-            if i != former or cnt + 1 > int(utils.cfg.get('HYPER_PARAMETER', 'batch_size')):
-                self.batch_size.append(cnt)
-                former, cnt = i, 0
-            cnt += 1
-        self.batch_size.append(cnt)  # 把最后一天的也加入
-
-    def __getitem__(self, index):
-        return tuple(tensor[index] for tensor in self.tensors)
-
-    def __len__(self):
-        return self.tensors[0].size(0)
-
-
-class SequentialSampler(tud.Sampler):
-    r'''
-    依据动态batch_size，调整每个batch内的序号数
-    '''
-
-    def __init__(self, data_source, batch_size=None, shuffle=False):
-        self.data_source = data_source
-        self.batch_sizes = self.data_source.batch_size
-        self.shuffle = shuffle
-
-    def flatten_list(self, lst):
-        return [item for sublist in lst for item in sublist]
-
-    def __iter__(self):
-        cluster_indices = self.data_source.cluster_indices
-        batches, cnt = [], 0
-
-        for len_ in self.batch_sizes:
-            batches += [cluster_indices[cnt:cnt + len_]]
-            cnt = cnt + len_
-
-        if self.shuffle: random.shuffle(batches)
-
-        return iter(batches)
-
-    def __len__(self):
-        return len(self.data_source)
+# HACK 若要实现传统的variable batch size，TensorDataset, SequentialSampler等待修改，暂时弃用
+# class TensorDataset(tud.Dataset):
+#     r'''
+#     根据每天的微博数，分别获取动态batch_size
+#     由于每天的微博数两在1K以上，若把1K量级数作为Batch_size，不合适
+#     于是再把每天的微博数细分到mini-batch
+#     '''
+#
+#     def __init__(self, *args, **kwargs):
+#         assert all(args[0].size(0) == tensor.size(0) for tensor in args)
+#         self.tensors = args
+#         self.day = (kwargs['preprocessed_data']['datetime'].dt.month - 1) * 31 + kwargs['preprocessed_data'][
+#             'datetime'].dt.day
+#         self.cluster_indices = [i for i in range(len(self.day))]
+#
+#         self.batch_size = []
+#         cnt, former = 0, 1
+#         for i in self.day:
+#             if i != former or cnt + 1 > int(utils.cfg.get('HYPER_PARAMETER', 'batch_size')):
+#                 self.batch_size.append(cnt)
+#                 former, cnt = i, 0
+#             cnt += 1
+#         self.batch_size.append(cnt)  # 把最后一天的也加入
+#
+#     def __getitem__(self, index):
+#         return tuple(tensor[index] for tensor in self.tensors)
+#
+#     def __len__(self):
+#         return self.tensors[0].size(0)
+#
+#
+# class SequentialSampler(tud.Sampler):
+#     r'''
+#     依据动态batch_size，调整每个batch内的序号数
+#     '''
+#
+#     def __init__(self, data_source, batch_size=None, shuffle=False):
+#         self.data_source = data_source
+#         self.batch_sizes = self.data_source.batch_size
+#         self.shuffle = shuffle
+#
+#     def flatten_list(self, lst):
+#         return [item for sublist in lst for item in sublist]
+#
+#     def __iter__(self):
+#         cluster_indices = self.data_source.cluster_indices
+#         batches, cnt = [], 0
+#
+#         for len_ in self.batch_sizes:
+#             batches += [cluster_indices[cnt:cnt + len_]]
+#             cnt = cnt + len_
+#
+#         if self.shuffle: random.shuffle(batches)
+#
+#         return iter(batches)
+#
+#     def __len__(self):
+#         return len(self.data_source)
 
 
 class Dataset():
@@ -474,9 +479,9 @@ def format_time(elapsed):
 
 
 if __name__ == '__main__':
-    use_variable_batch = int(utils.cfg.get('HYPER_PARAMETER', 'use_variable_batch'))
-    train_bayes = int(utils.cfg.get('HYPER_PARAMETER', 'train_bayes'))
+    # use_variable_batch = int(utils.cfg.get('HYPER_PARAMETER', 'use_variable_batch'))
+    # train_bayes = int(utils.cfg.get('HYPER_PARAMETER', 'train_bayes'))
 
-    train(use_variable_batch=use_variable_batch, train_bayes=train_bayes)
+    train()
 
     test()

@@ -119,13 +119,6 @@ class Hashtag():
 
         return res
 
-    def _day_by_day_distribution(self, thresh: list, thresh_flag=False):
-        '''
-        计算各Hashtag极性分别在每天的概率分布
-        :return:
-        '''
-        start_time = time.time()
-
     def bayes(self, logits: list):
         '''
         logits: [narray,narray,...]
@@ -159,13 +152,6 @@ class Hashtag():
 
         return res
 
-
-class TextCluster():
-    def __init__(self):
-        '''
-        把无hashtag微博聚类到已有的hashtag
-        结合emoj
-        '''
 
 
 if __name__ == '__main__':
