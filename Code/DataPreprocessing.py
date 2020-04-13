@@ -27,7 +27,7 @@ class DataCleaningStep(metaclass=ABCMeta):
         self.run(args[0])
         end_time = time.time()
         # Unlabeled数据集不应该执行且输出LabelCheck信息
-        if (len(args[0].columns) == 6 or args[1] != 'LabelCheck'):
+        if (len(args[0].columns) == 7 or args[1] != 'LabelCheck'):
             print(f'已执行数据清洗步骤：{self.__doc__.strip()}，用时：{round(end_time - start_time, 2)}s')
 
     @abc.abstractmethod
@@ -58,6 +58,20 @@ class DataCleaningStep(metaclass=ABCMeta):
 
     def _to_simplified(self, x):
         return [cc.to_simplified(proc) for proc in x]
+
+    def _unqualified_label(self, x):
+        '''
+        :param x:[index, series]
+        :return: 不合格index, [index]
+        '''
+        res = []
+        for index, row in x:
+            if ((row[6] == '0') | (row[6] == '1') | (row[6] == '-1') | (row[6] == 0) | (row[6] == 1) | (row[6] == -1)):
+                continue
+            else:
+                res.append(index)
+
+        return res
 
 
 class Batch:
@@ -97,18 +111,44 @@ class DataCleaningToolSet:
     """
 
     def __init__(self):
-        self._tools = [tool for tool in dir(self) if
-                       not tool.startswith('__') and not tool.endswith('__') and tool[0].isupper()]
+        # self._tools = [tool for tool in dir(self) if
+        #                not tool.startswith('__') and not tool.endswith('__') and tool[0].isupper()]
+        # 显式排序，配合Dataset中tool_whether_do的值
+        self._tools = ['LabelCheck', 'DropExtraContentInTheEnd', 'DropHashtagAndAtReply',
+                       'TraditionalChineseToSimplifiedChinese']
 
     def __getitem__(self, item):
         return getattr(self, item)
+
+    class LabelCheck(DataCleaningStep):
+        '''
+        Label有各种噪音，暂时舍弃
+        '''
+
+        # TODO 等待讨论噪音标签的处理方法
+        def run(self, dataset: pd.DataFrame, n_cores=10):
+            # 如果是test，则直接pass
+            if len(dataset.columns) == 7:
+                # 非比赛数据，即自己搜集的数据label被解析成int，因此加入int类型判断
+                # TODO 查找为什么会被解析成int
+                print('---开始清洗Label noise---')
+                with Pool(n_cores) as p:
+                    res = p.map(self._unqualified_label, Batch(n_cores, list(dataset.iterrows())))
+                    res = reduce(lambda x, y: x + y, res)
+
+                dataset.drop(res, inplace=True)
+                dataset.set_index(['id'], inplace=True)
+                dataset.sentiment = dataset.sentiment.astype(int)
+                # 分类训练时，n_class >=0 & n_class <= max_classes
+                # 因此把-1映射到0,0映射到1,1映射到2
+                dataset.sentiment = dataset.sentiment + 1
 
     class DropExtraContentInTheEnd(DataCleaningStep):
         """
         去除微博内容最后的"?"和"展开全文c"
         """
 
-        def run(self, dataset: pd.DataFrame, n_cores=6):
+        def run(self, dataset: pd.DataFrame, n_cores=10):
             with Pool(n_cores) as p:
                 exp = '\?展开全文c$|\?$|O网页链接'
                 res = p.map(partial(self._regexp_sub, exp), Batch(n_cores, dataset.content.to_list()))
@@ -141,26 +181,6 @@ class DataCleaningToolSet:
                 dataset.drop('content', inplace=True, axis=1)
                 dataset.insert(2, 'content', res)
 
-    class LabelCheck(DataCleaningStep):
-        '''
-        Label有各种噪音，暂时舍弃
-        '''
-
-        # TODO 等待讨论噪音标签的处理方法
-        def run(self, dataset: pd.DataFrame, n_cores=8):
-            # 如果是test，则直接pass
-            if len(dataset.columns) == 6:
-                # 非比赛数据，即自己搜集的数据label被解析成int，因此加入int类型判断
-                # TODO 查找为什么会被解析成int
-                cleaned_data = dataset[
-                    (dataset['sentiment'] == '0') | (dataset['sentiment'] == '1') | (dataset['sentiment'] == '-1') | (
-                            dataset['sentiment'] == 0) | (dataset['sentiment'] == 1) | (dataset['sentiment'] == -1)]
-                cleaned_data.sentiment = cleaned_data.sentiment.astype(int)
-                # 分类训练时，n_class >=0 & n_class <= max_classes
-                # 因此把-1映射到0,0映射到1,1映射到2
-                cleaned_data.sentiment = cleaned_data.sentiment + 1
-                dataset._data = cleaned_data._data
-
     @property
     def tools(self):
         return self._tools
@@ -168,11 +188,14 @@ class DataCleaningToolSet:
 
 class Dataset(pd.DataFrame):
 
-    def __init__(self, path: str, type_: int):
+    def __init__(self, path: str, type_: int, tool_whether_do=4):
         """
         数据文件类初始化函数，直接继承自DataFrame
         :param path: 数据文件路径
         :param type_: 数据文件类型
+        :param tool_whether_do: 数据清洗执行到哪步
+        依次是'LabelCheck', 'DropExtraContentInTheEnd', 'DropHashtagAndAtReply',
+        'TraditionalChineseToSimplifiedChinese'
         """
 
         # 以下为读取数据部分
@@ -180,30 +203,28 @@ class Dataset(pd.DataFrame):
         assert os.path.exists(path), '数据文件路径错误！'
 
         if type_ == DatasetType.SENTIMENTRELEVENTCORPUS:
-            self._data = pd.read_csv(path)._data
+            self._data = pd.read_csv(path, usecols=[1, 2, 3, 4, 5], )._data
             print('已读入标注数据集')
             self.index.name = 'ID'
         else:
+            dateparser = lambda x: pd.datetime.strptime(x, '%m月%d日 %H:%M')
             if type_ == DatasetType.LABELED:
-                self._data = pd.read_csv(path, index_col=['微博id'])._data
+                df = pd.read_csv(path, usecols=[0, 1, 2, 3, 4, 5, 6], parse_dates=['微博发布时间'], date_parser=dateparser)
+                # 配合动态设置batch_size使用，如果不启用功能，则注释该行
+                df.sort_values(by='微博发布时间', inplace=True)
+                self._data = df._data
                 print('已读入标注数据集')
-                self.columns = ['datetime', 'poster', 'content', 'image', 'video', 'sentiment']
+                self.columns = ['id', 'datetime', 'poster', 'content', 'image', 'video', 'sentiment']
                 self.index.name = 'ID'
-            elif type_ == DatasetType.UNLABELED:
-                dateparser = lambda x: pd.datetime.strptime(x, '%m月%d日 %H:%M')
-                self._data = pd.read_csv(path, index_col=['微博id'], parse_dates=['微博发布时间'],
-                                         date_parser=dateparser)._data
-                print('已读入未标注数据集')
-                self.columns = ['datetime', 'poster', 'content', 'image', 'video']
-                self.index.name = 'ID'
-                self.datetime += pd.Timedelta(120 * 365, unit='d')
             else:
-                dateparser = lambda x: pd.datetime.strptime(x, '%m月%d日 %H:%M')
-                self._data = pd.read_csv(path, index_col=['微博id'], parse_dates=['微博发布时间'], date_parser=dateparser)._data
-                print('已读入测试集')
+                # 若要区分train unlabel test，则可基于本else代码段重新改写
+                df = pd.read_csv(path, index_col=['微博id'], parse_dates=['微博发布时间'], date_parser=dateparser)
+                # 配合动态设置batch_size使用，如果不启用功能，则注释该行
+                df.sort_values(by='微博发布时间', inplace=True)
+                self._data = df._data
+                print('已读入无标注数据集')
                 self.columns = ['datetime', 'poster', 'content', 'image', 'video']
                 self.index.name = 'ID'
-                self.datetime += pd.Timedelta(120 * 365, unit='d')
 
         self._cleaned_data = None
         self._cat_hashtags = None
@@ -211,12 +232,16 @@ class Dataset(pd.DataFrame):
         # 以下为注册要执行的数据清理工具部分
         self.tool_set = DataCleaningToolSet()
         self.registered_tools = []
-        self.register_data_clean_tools(self.tool_set.tools)
+        self.register_data_clean_tools(self.tool_set.tools, tool_whether_do)
 
-    def register_data_clean_tools(self, tools: list):
+    def register_data_clean_tools(self, tools: list, flag: int):
+        cnt = 1
+
         for tool in tools:
             assert tool in self.tool_set.tools, f"清洗工具{tool}不存在"
+            if cnt > flag: break
             self.registered_tools.append(tool)
+            cnt += 1
 
     @property
     def cleaned_data(self):
@@ -266,20 +291,20 @@ class Dataset(pd.DataFrame):
 
 class LabeledDataset(Dataset):
 
-    def __init__(self, path: str = utils.cfg.get('ORIGINAL_DATA', 'train_labeled_path')):
-        Dataset.__init__(self, path, DatasetType.LABELED)
+    def __init__(self, flag: int = 2, path: str = utils.cfg.get('ORIGINAL_DATA', 'train_labeled_path')):
+        Dataset.__init__(self, path, DatasetType.LABELED, flag)
 
 
 class UnlabeledDataset(Dataset):
 
-    def __init__(self, path: str = utils.cfg.get('ORIGINAL_DATA', 'train_unlabeled_path')):
-        Dataset.__init__(self, path, DatasetType.UNLABELED)
+    def __init__(self, flag: int = 1, path: str = utils.cfg.get('ORIGINAL_DATA', 'train_unlabeled_path')):
+        Dataset.__init__(self, path, DatasetType.UNLABELED, flag)
 
 
 class TestDataset(Dataset):
 
-    def __init__(self, path: str = utils.cfg.get('ORIGINAL_DATA', 'test_path')):
-        Dataset.__init__(self, path, DatasetType.TEST)
+    def __init__(self, flag: int = 2, path: str = utils.cfg.get('ORIGINAL_DATA', 'test_path')):
+        Dataset.__init__(self, path, DatasetType.TEST, flag)
 
     def submit(self, path: str = utils.cfg.get('PROCESSED_DATA', 'submit_csv_path')):
         """
@@ -355,22 +380,11 @@ def sample_add_sentiment():
     # 暂时解决方案：重试。等待完善删除所有重复
     assert os.path.exists(utils.cfg.get('PROCESSED_DATA', 'unlabel_pseudo_path')), 'unlabel_pseudo文件路径错误或不存在或命名错误！'
     sentiment_polar = pd.read_csv(utils.cfg.get('PROCESSED_DATA', 'unlabel_pseudo_path'), encoding='utf-8')
-    train_unlabel = pd.read_csv(utils.cfg.get('ORIGINAL_DATA', 'train_unlabeled_path'), encoding='utf-8')
+    train_unlabel = pd.read_csv(utils.cfg.get('ORIGINAL_DATA', 'train_unlabel_path'), encoding='utf-8')
     train_unlabel.columns = ['ID', 'datetime', 'poster', 'content', 'image', 'video']
 
-    sentiment_sample = sentiment_polar.sample(frac=0.1)  # frac是抽样比例
-    sentiment_sample.sort_values('id', inplace=True)
-    train_unlabel_sample = train_unlabel.loc[train_unlabel['ID'].isin(sentiment_sample['id'].to_list())]
-    train_unlabel_sample.sort_values('ID', inplace=True)  # 两次sort是为映射标签做准备
-    # 保留ID第一次重复的行，其余重复行全部删除
-    train_unlabel_sample.drop_duplicates(subset=['ID'], keep='first', inplace=True)
-    # 注释部分是删除所有重复ID对应行，不保留
-    # duplicated_row=train_unlabel_sample.loc[train_unlabel_sample['ID'].duplicated(keep='first'),'ID']
-    # unlabel_isin=train_unlabel_sample['ID'].isin(duplicated_row.unique())
-    # unlabel_index=train_unlabel_sample.index[unlabel_isin]
-    # train_unlabel_sample.drop(unlabel_index, inplace=True)
-
-    train_unlabel_sample.insert(loc=6, column='sentiment', value=sentiment_sample['y'].to_list())
+    train_unlabel.insert(loc=6, column='sentiment', value=sentiment_polar['y'].to_list())
+    train_unlabel_sample = train_unlabel.sample(frac=0.1)  # frac是抽样比例
     train_unlabel_sample.to_csv(utils.cfg.get('PROCESSED_DATA', 'unlabel_sample_path'), index=False)
 
     # 合并文件
