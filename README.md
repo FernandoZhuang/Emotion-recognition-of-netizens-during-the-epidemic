@@ -66,6 +66,11 @@
 1. [Using Convolutional Neural Net for Sentiment Analysis ](https://github.com/Theo-/sentiment-analysis-keras-conv)
 2. [情感分析资源大全](https://blog.csdn.net/qq280929090/article/details/70838025)
 
+### 赛后总结
+
+1. [datafountain-sentiment-recognition](https://github.com/JOHNYXUU/datafountain-sentiment-recognition)
+2. [疫情期间网民情绪识别】比赛全面复盘](https://www.shangyexinzhi.com/article/1687497.html)
+
 ## 数据预处理
 
 ### I/O
